@@ -16,6 +16,8 @@ SVG / PDF / AI 分析和 PDF 导出需要单独安装 **Inkscape**，在工作�
 
 不要直接把整个源码目录或 `projects/` 发给别人。请从 GitHub Release 下载 Windows 发布包，解压到有写入权限的文件夹（不要放在 Program Files），然后双击 `run.bat`。发布包中应有同目录的 `LogoMock.exe`、`run.bat` 和本说明；使用者不需要安装 Python。
 
+对外默认推荐“LogoMock 绿色版 + 官方 Inkscape 64 位 MSI 安装版”，而不是把 552 MB 的便携 Inkscape 混进发布包。请参阅[绿色版完整使用说明](./docs/绿色版使用说明.md)，其中包含安装 Inkscape、首次配置、便携版例外情形和故障排查。
+
 首次使用 AI / SVG / PDF 素材或需要导出 PDF 时，使用者需安装 Inkscape，并在应用“设置”里选择它的 `bin/inkscape.exe`。如需预先配置，也可复制 `config.example.json` 为本机 `config.json`，再修改路径；`config.json` 不应提交到 GitHub。
 
 产品图、Logo、项目数据和导出文件仅保存在使用者自己的 `projects/` 目录。不要把该目录上传到仓库或作为公开发布包的一部分。
