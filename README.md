@@ -9,7 +9,7 @@
 
 项目放在数据目录的 `projects/`，配置在 `config.json`。直接运行 EXE 时，数据目录默认是 EXE 所在文件夹；本项目的 `run.bat` 使用本项目目录，所以能打开已有订单。请把应用放在自己有写入权限的文件夹，不要放进 Program Files。
 
-SVG / PDF / AI 分析和 PDF 导出需要单独安装 **Inkscape**，在工作台“设置”中选择 `bin/inkscape.exe`。当前开发机使用项目 `tools/inkscape/inkscape/` 中的便携版本；发布 EXE 不包含 Inkscape。换电脑需重新设置路径。
+SVG / PDF / AI 分析和 PDF 导出需要单独安装 **Inkscape**，在工作台“设置”中选择 `bin/inkscape.exe`。发布 EXE 不包含 Inkscape；换电脑需安装 Inkscape 并重新设置路径。
 
 ## 分享给其他人
 
