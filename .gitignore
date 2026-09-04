@@ -1,0 +1,30 @@
+# Local runtime data and user assets
+projects/
+config.json
+*.runtime.json
+*.log
+
+# Generated application output and build environments
+dist/
+build/
+.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local engines, downloads, diagnostics, and recovery material
+tools/inkscape/
+tools/tk-runtime/
+tools/inkscape-download-parts/
+tools/*.7z
+tools/prepare_live_qa.py
+tools/qa_*.py
+tools/review_diff.py
+_qa/
+_probe/
+backups/
+.superpowers/
+
+# Original test artwork kept only on this workstation
+测试/
