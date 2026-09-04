@@ -1,7 +1,6 @@
 # LogoMock · 内部印标工作台 V1
 
-本机使用的产品图 + Logo 排版工具。当前不部署网站，不开放客户账号。
-
+本机使用的产品图 + Logo 排版工具。
 ## 打开应用
 
 双击 `run.bat`。发布包的 `LogoMock.exe` 已包含 Python，不需要另装 Python。
