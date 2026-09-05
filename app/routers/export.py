@@ -10,11 +10,45 @@ from PIL import Image
 
 from app.config import get_engine
 from app.routers import project
-from app.services import placement_svg,selection_png,spec_svg
+from app.services import customer_export, placement_svg, save_dialog, selection_png, spec_svg
+from app.services import version_store as versions
 from app.services.errors import AppError,INVALID_PAYLOAD,ENGINE_NOT_FOUND
 from app.services.geometry import normalize_geometry,validate_export
 
 router=APIRouter(prefix='/api/projects/{name}',tags=['export'])
+
+
+def require_single_active_scheme(source):
+    if len(source.schemes) != 1:
+        raise AppError(INVALID_PAYLOAD, '客户确认图需要且只能保留一个 Logo 方案')
+    return source.schemes[0]
+
+
+@router.post('/customer-export')
+def export_customer_confirmation(name: str, payload: dict):
+    source = project.load(name)
+    if payload.get('revision') != source.revision:
+        raise AppError('REVISION_CONFLICT', '导出前任务已更新，请重新检查后再导出')
+    scheme = require_single_active_scheme(source)
+    validate_export(source, [scheme])
+    if not source.inputs.bag_image or not source.inputs.logo_preview:
+        raise AppError(INVALID_PAYLOAD, '请先上传产品图片并确认 Logo')
+    requested_name = payload.get('filename')
+    initial_name = requested_name if isinstance(requested_name, str) and requested_name else f'{name}_效果图.png'
+    destination = save_dialog.choose_png_destination(initial_name)
+    if destination is None:
+        return {'ok': True, 'data': {'cancelled': True}}
+    try:
+        preview = customer_export.render_confirmation(
+            project.safe_file(name, source.inputs.bag_image),
+            project.safe_file(name, source.inputs.logo_preview),
+            scheme,
+            source.crop,
+        )
+    except (OSError, ValueError) as exc:
+        raise AppError(INVALID_PAYLOAD, f'无法生成客户确认图：{exc}') from exc
+    manifest = versions.commit_version(name, source, preview, destination.name, destination)
+    return {'ok': True, 'data': {'cancelled': False, 'version': manifest.model_dump()}}
 
 
 @router.post('/export')
