@@ -2,13 +2,16 @@
 import base64
 import io
 import re
+import shutil
 import uuid
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from PIL import Image
 
+from app.engine.base import EngineError
 from app.models import Asset, AssetObject, AssetPage, Candidate, Rect
+from app.services.pdf_pages import page_count
 from app.services import svg_document as svg
 from app.services.raster_assets import clean_raster, component_images
 
@@ -271,6 +274,206 @@ def analyze(source,folder,engine,project_root):
     return Asset(id=uuid.uuid4().hex,source_svg=relative(source_svg),source_preview=relative(preview),kind=kind,
                  width=chosen.box.w,height=chosen.box.h,source_box=page,objects=objects,candidates=candidates,
                  selected_ids=chosen.object_ids,warnings=warnings)
+
+
+def _vector_objects(root, source_svg, engine, page, folder):
+    boxes = engine.query_all(source_svg)
+    items = []
+    for element in svg.drawable_elements(root):
+        ident = element.get('id')
+        if ident not in boxes:
+            continue
+        x, y, w, h = boxes[ident]
+        if w <= 0 or h <= 0:
+            continue
+        text = ''.join(element.itertext()).strip()
+        styles = dict(part.split(':', 1) for part in element.get('style', '').split(';') if ':' in part)
+        styles = {key.strip(): value.strip() for key, value in styles.items()}
+        commands = re.findall(r'[a-df-zA-DF-Z]', element.get('d', ''))
+        straight = svg.tag(element) == 'line' or (
+            svg.tag(element) == 'path' and bool(commands) and all(command.lower() in 'mlhvz' for command in commands)
+        )
+        items.append(dict(
+            id=ident,
+            label=text[:60] or f'{svg.tag(element)} · {ident.rsplit("--", 1)[-1]}',
+            text=text,
+            tag=svg.tag(element),
+            straight=straight,
+            fill=styles.get('fill', element.get('fill', '#000000')),
+            stroke=styles.get('stroke', element.get('stroke', 'none')),
+            compound=sum(command.lower() == 'm' for command in commands) >= 4,
+            box=dict(x=x + page.x, y=y + page.y, w=w, h=h),
+        ))
+    preliminary = classify_objects(items, page)
+    dimension_colors = {items[index]['stroke'] for index, obj in enumerate(preliminary) if obj.reason == 'dimension'}
+    for item in items:
+        if not item['compound'] or item['fill'] not in dimension_colors:
+            continue
+        bounds = Rect.model_validate(item['box'])
+        probe = folder / f'probe-{uuid.uuid4().hex}.svg'
+        probe.write_text(svg.select_svg(root, {item['id']}, bounds), encoding='utf-8')
+        render_preview(probe, probe.with_suffix('.png'), engine, 'vector', width=512)
+        with Image.open(probe.with_suffix('.png')) as image:
+            histogram = image.convert('RGBA').getchannel('A').histogram()
+            item['alpha_occupancy'] = sum(histogram[16:]) / (image.width * image.height)
+    return classify_objects(items, page)
+
+
+def _candidate_previews(page, root, source_svg, engine, project_root, kind):
+    relative = lambda path: Path(path).relative_to(project_root).as_posix()
+    for candidate in page.candidates:
+        candidate_svg = Path(source_svg).with_name(f'{candidate.id}.svg')
+        candidate_svg.write_text(svg.select_svg(root, set(candidate.object_ids), candidate.box), encoding='utf-8')
+        candidate_png = candidate_svg.with_suffix('.png')
+        render_preview(candidate_svg, candidate_png, engine, kind, width=320)
+        candidate.preview = relative(candidate_png)
+
+
+def analyse_svg_page(page_svg, engine, project_root, page_id, number):
+    """Analyse one converted vector page and persist its page/candidate previews."""
+    page_svg = Path(page_svg)
+    root = svg.prefix_ids(svg.prepare_svg(page_svg), f'{page_id}--')
+    page_svg.write_text(svg.serialize(root), encoding='utf-8')
+    source_box = svg.view_box(root)
+    objects = _vector_objects(root, page_svg, engine, source_box, page_svg.parent)
+    page = group_page_candidates(root, objects, page_id=page_id, page_number=number)
+    if not page.candidates:
+        raise ValueError('未发现可用 Logo 图形，请检查文件')
+    preview = page_svg.with_suffix('.png')
+    render_preview(page_svg, preview, engine, 'vector')
+    page.source_svg = page_svg.relative_to(project_root).as_posix()
+    page.source_preview = preview.relative_to(project_root).as_posix()
+    page.source_box = source_box
+    _candidate_previews(page, root, page_svg, engine, project_root, 'vector')
+    return page
+
+
+def _analyse_raster_page(source, page_svg, engine, project_root, page_id):
+    from app.routers.upload import image_from_bytes
+
+    root, items = _raster_source(image_from_bytes(Path(source).read_bytes()))
+    root = svg.prefix_ids(root, f'{page_id}--')
+    for item in items:
+        item['id'] = f'{page_id}--{item["id"]}'
+    page_svg = Path(page_svg)
+    page_svg.write_text(svg.serialize(root), encoding='utf-8')
+    source_box = svg.view_box(root)
+    objects = classify_objects(items, source_box)
+    page = group_page_candidates(root, objects, page_id=page_id, page_number=1)
+    if not page.candidates:
+        raise ValueError('图片中没有检测到可用 Logo')
+    preview = page_svg.with_suffix('.png')
+    render_preview(page_svg, preview, engine, 'raster')
+    page.source_svg = page_svg.relative_to(project_root).as_posix()
+    page.source_preview = preview.relative_to(project_root).as_posix()
+    page.source_box = source_box
+    _candidate_previews(page, root, page_svg, engine, project_root, 'raster')
+    return page
+
+
+def analyse_source(source, folder, engine, project_root):
+    """Read every available source page while retaining a visible error for each failure."""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=False)
+    source = Path(source)
+    kind = 'raster' if source.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp'} else 'vector'
+    warnings = ['自动清理是可恢复的建议：请核对 Logo、标注、背景与分离图形，尤其是已转曲的尺寸文字。']
+    if kind == 'raster':
+        warnings.append('此素材是位图：只清理边缘连通的纯色背景，不会变成真正的矢量；白色内部区域予以保留。')
+        pages = [_analyse_raster_page(source, folder / 'page-0001.svg', engine, project_root, 'page-0001')]
+    else:
+        if not engine.available():
+            raise EngineError('ENGINE_NOT_FOUND', '分析 SVG / AI / PDF 需要 Inkscape，请先在设置中配置')
+        count = page_count(source) if source.suffix.lower() in {'.pdf', '.ai'} else 1
+        pages = []
+        for number in range(1, count + 1):
+            page_id = f'page-{number:04d}'
+            page_svg = folder / f'{page_id}.svg'
+            try:
+                if source.suffix.lower() == '.svg':
+                    shutil.copy2(source, page_svg)
+                else:
+                    engine.to_svg_page(source, page_svg, number)
+                pages.append(analyse_svg_page(page_svg, engine, project_root, page_id, number))
+            except (ValueError, EngineError) as exc:
+                pages.append(AssetPage(id=page_id, number=number, label=f'页面 {number}', error=f'第 {number} 页无法读取：{exc}'))
+    first = next((page for page in pages if page.candidates), None)
+    if first is None:
+        raise ValueError('没有可用的 Logo 内容，请检查源文件或 Inkscape 设置')
+    chosen = first.candidates[0]
+    for page in pages:
+        for obj in page.objects:
+            obj.selected = obj.id in chosen.object_ids
+    if sum(len(page.candidates) for page in pages) > 1:
+        warnings.append('发现多个候选内容，暂选第一个候选；可组合多个候选，避免漏掉文字或附属图形。')
+    return Asset(
+        id=uuid.uuid4().hex,
+        kind=kind,
+        pages=pages,
+        selected_candidate_ids=[chosen.id],
+        selected_ids=list(chosen.object_ids),
+        width=chosen.box.w,
+        height=chosen.box.h,
+        warnings=warnings,
+    )
+
+
+def apply_candidates(asset, candidate_ids, project_root, engine):
+    """Compose only server-known candidate objects into one clean SVG and PNG."""
+    if not isinstance(candidate_ids, list) or not candidate_ids or any(not isinstance(item, str) for item in candidate_ids):
+        raise ValueError('请选择一个或多个有效候选内容')
+    if len(candidate_ids) != len(set(candidate_ids)):
+        raise ValueError('候选内容不能重复选择')
+    candidates = {candidate.id: (page, candidate) for page in asset.pages for candidate in page.candidates}
+    if not set(candidate_ids) <= candidates.keys():
+        raise ValueError('请选择一个或多个有效候选内容')
+    selected_by_page = {}
+    selected_ids = []
+    boxes = []
+    for candidate_id in candidate_ids:
+        page, candidate = candidates[candidate_id]
+        selected_by_page.setdefault(page.id, []).extend(candidate.object_ids)
+        selected_ids.extend(candidate.object_ids)
+        boxes.append(candidate.box)
+    bounds = union_box(boxes)
+    if min(bounds.w, bounds.h) <= 0:
+        raise ValueError('Logo 的宽、高必须大于零')
+    token = uuid.uuid4().hex
+    target_parent = Path(project_root) / Path(asset.pages[0].source_svg).parent
+    target = target_parent / f'clean-{token}.svg'
+    composed = ET.Element(
+        f'{{{svg.SVG}}}svg',
+        width=svg.number(bounds.w),
+        height=svg.number(bounds.h),
+        viewBox=f'0 0 {svg.number(bounds.w)} {svg.number(bounds.h)}',
+    )
+    for page in asset.pages:
+        identifiers = selected_by_page.get(page.id)
+        if not identifiers:
+            continue
+        if not page.source_svg or not page.source_box:
+            raise ValueError('所选页面无法读取')
+        root = svg.prepare_svg(Path(project_root) / page.source_svg)
+        page_bounds = union_box(obj.box for obj in page.objects if obj.id in set(identifiers))
+        fragment = ET.fromstring(svg.select_svg(root, set(identifiers), page_bounds))
+        fragment.set('x', svg.number(page_bounds.x - bounds.x))
+        fragment.set('y', svg.number(page_bounds.y - bounds.y))
+        fragment.set('width', svg.number(page_bounds.w))
+        fragment.set('height', svg.number(page_bounds.h))
+        composed.append(fragment)
+    target.write_text(svg.serialize(composed), encoding='utf-8')
+    preview = target.with_suffix('.png')
+    render_preview(target, preview, engine, asset.kind, width=2048)
+    result = asset.model_copy(deep=True)
+    result.id = token
+    result.width = bounds.w
+    result.height = bounds.h
+    result.selected_candidate_ids = list(candidate_ids)
+    result.selected_ids = selected_ids
+    for page in result.pages:
+        for obj in page.objects:
+            obj.selected = obj.id in selected_ids
+    return result, target.relative_to(project_root).as_posix(), preview.relative_to(project_root).as_posix()
 
 
 def apply_selection(asset,selected_ids,project_root,engine):

@@ -1,11 +1,16 @@
 from pathlib import Path
 from xml.etree import ElementTree as ET
+import io
 
 import pytest
+from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 from pypdf import PdfWriter
 
-from app.models import AssetObject, Rect
+from app.main import app
+from app.engine.base import EngineError
+from app.models import Asset, AssetObject, AssetPage, Candidate, Inputs, Rect
+from app.routers import convert, project as repo
 from app.services import pdf_pages
 from app.services import assets, svg_document as svg
 from app.services.svg_document import prepare_svg, select_svg
@@ -13,6 +18,19 @@ from app.services.assets import classify_objects, group_candidates
 from app.services.raster_assets import clean_raster
 
 NS = '{http://www.w3.org/2000/svg}'
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(repo, 'PROJECTS_DIR', tmp_path / 'projects')
+    with TestClient(app) as value:
+        yield value
+
+
+def data(response):
+    body = response.json()
+    assert body['ok'], body
+    return body['data']
 
 
 def test_page_count_reads_all_pdf_pages(tmp_path):
@@ -47,6 +65,82 @@ def test_grouped_wordmark_is_one_candidate_but_nested_background_is_separate(tmp
     assert frozenset({'page-0001--s', 'page-0001--t'}) in by_members
     assert frozenset({'page-0001--background'}) in by_members
     assert frozenset({'page-0001--dimension'}) in by_members
+
+
+def uploaded_two_page_pdf_project(client):
+    data(client.post('/api/projects', json={'name': 'sample'}))
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.add_blank_page(width=100, height=100)
+    source = io.BytesIO()
+    writer.write(source)
+    return data(client.post('/api/projects/sample/upload/logo', files={'file': ('source.pdf', source.getvalue(), 'application/pdf')}))
+
+
+def test_analysis_keeps_failed_second_page_visible_and_does_not_silently_drop_it(monkeypatch, client):
+    uploaded_two_page_pdf_project(client)
+
+    class Engine:
+        def available(self):
+            return True
+
+        def to_svg_page(self, _source, destination, number):
+            destination.write_text(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><rect id="shape-{number}" width="20" height="10"/></svg>')
+
+    def analyse_page(_path, _engine, _root, page_id, number):
+        if number == 2:
+            raise EngineError('CONVERT_FAILED', '页面内容损坏')
+        return AssetPage(
+            id=page_id, number=number, label=f'页面 {number}', source_svg='input/page.svg',
+            source_preview='input/page.png', source_box={'x': 0, 'y': 0, 'w': 100, 'h': 50},
+            candidates=[Candidate(id=f'{page_id}--candidate-1', label='组 1', object_ids=[f'{page_id}--mark'], box={'x': 10, 'y': 10, 'w': 40, 'h': 20})],
+        )
+
+    monkeypatch.setattr(convert, 'get_engine', lambda: Engine())
+    monkeypatch.setattr(assets, 'analyse_svg_page', analyse_page)
+    monkeypatch.setattr(
+        convert,
+        'apply_candidates',
+        lambda asset, _ids, _root, _engine: (asset, 'input/clean.svg', 'input/clean.png'),
+        raising=False,
+    )
+
+    result = data(client.post('/api/projects/sample/convert'))
+
+    assert [page['number'] for page in result['asset']['pages']] == [1, 2]
+    assert result['asset']['pages'][0]['error'] is None
+    assert '第 2 页' in result['asset']['pages'][1]['error']
+
+
+def ready_multi_candidate_project(client):
+    data(client.post('/api/projects', json={'name': 'sample'}))
+    item = repo.load('sample')
+    first = Candidate(id='page-0001--candidate-1', label='组 1', object_ids=['page-0001--word'], box={'x': 10, 'y': 10, 'w': 40, 'h': 20})
+    second = Candidate(id='page-0001--candidate-2', label='对象 1', object_ids=['page-0001--mark'], box={'x': 70, 'y': 10, 'w': 20, 'h': 20})
+    page = AssetPage(id='page-0001', number=1, label='页面 1', source_svg='input/source.svg', source_preview='input/source.png', source_box={'x': 0, 'y': 0, 'w': 100, 'h': 60}, candidates=[first, second])
+    item.asset = Asset(id='asset', kind='vector', pages=[page], selected_candidate_ids=[], selected_ids=[], width=40, height=20)
+    item.inputs = Inputs(logo_source='input/source.pdf')
+    repo.save('sample', item)
+    return item.model_dump(), [first.id, second.id]
+
+
+def test_select_candidates_unions_only_their_server_side_objects(client, monkeypatch):
+    _project, candidate_ids = ready_multi_candidate_project(client)
+    seen = {}
+
+    def fake_apply(asset, chosen_ids, _project_root, _engine):
+        seen['candidate_ids'] = chosen_ids
+        asset.selected_candidate_ids = chosen_ids
+        asset.selected_ids = ['page-0001--word', 'page-0001--mark']
+        return asset, 'input/clean.svg', 'input/clean.png'
+
+    monkeypatch.setattr(convert, 'apply_candidates', fake_apply)
+
+    saved = data(client.post('/api/projects/sample/asset/select', json={'candidate_ids': candidate_ids}))
+
+    assert saved['asset']['selected_candidate_ids'] == candidate_ids
+    assert seen['candidate_ids'] == candidate_ids
+    assert saved['asset']['selected_ids'] == ['page-0001--word', 'page-0001--mark']
 
 
 def test_svg_selection_preserves_group_transforms_defs_and_nonzero_origin(tmp_path):
