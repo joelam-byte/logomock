@@ -71,6 +71,42 @@ def test_legacy_open_does_not_rewrite_order(client):
     assert path.read_text() == original
 
 
+def test_legacy_project_reads_with_v3_defaults_without_rewrite(client):
+    path = repo.PROJECTS_DIR / 'legacy' / 'project.json'
+    path.parent.mkdir(parents=True)
+    original = json.dumps({'name': 'legacy', 'schemes': []})
+    path.write_text(original, encoding='utf-8')
+
+    loaded = data(client.get('/api/projects/legacy'))
+
+    assert loaded['status'] == 'editing'
+    assert loaded['next_version_number'] == 1
+    assert path.read_text(encoding='utf-8') == original
+
+
+def test_legacy_named_logo_color_remains_readable():
+    project = Project.model_validate({'schemes': [{'id': 'legacy', 'color': 'PANTONE 186 C'}]})
+
+    assert project.schemes[0].color == 'PANTONE 186 C'
+
+
+def test_project_list_exposes_version_summary_without_reading_output_files(client):
+    data(client.post('/api/projects', json={'name': 'sample'}))
+
+    listed = data(client.get('/api/projects'))[0]
+
+    assert listed == {
+        'name': 'sample',
+        'revision': 1,
+        'updated_at': listed['updated_at'],
+        'has_bag': False,
+        'has_logo': False,
+        'status': 'editing',
+        'version_count': 0,
+        'preview_path': None,
+    }
+
+
 def test_replacing_logo_invalidates_derived_asset_and_keeps_original(client):
     p = data(client.post('/api/projects',json={'name':'sample'}))
     p['inputs'] = dict(logo_source='input/old.svg',logo_svg='input/old-clean.svg',logo_preview='input/old.png')

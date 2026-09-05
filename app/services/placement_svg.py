@@ -27,7 +27,7 @@ def build(bag_path,bag_w,bag_h,frame,scheme,*,logo_path):
            f'相对参照框：距左 {scheme.offset_mm.left:.2f} mm / 距底 {scheme.offset_mm.bottom:.2f} mm',
            '定位图为缩放参考；实际尺寸以数字和 1:1 工艺稿为准。',
            '绿框为定位参照，不属于印刷图案；纯净效果图见 mockup PNG。']
-    if scheme.color:
+    if scheme.color not in (None, 'original'):
         lines.insert(2,'指定色号：'+scheme.color)
     for index,line in enumerate(lines):
         body+=f'<text x="18" y="{230+index*8}" font-family="Arial,Microsoft YaHei" font-size="3.6">{escape(line)}</text>'

@@ -3,6 +3,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+TaskStatus = Literal['editing', 'waiting_feedback', 'completed']
+ColorMode = Literal['original', 'black', 'white', 'gray']
+
+
 def relative_asset_path(value):
     if value is None:
         return value
@@ -53,7 +57,15 @@ class Scheme(Model):
     logo_px: Rect = Field(default_factory=Rect)
     size_mm: SizeMM = Field(default_factory=SizeMM)
     offset_mm: OffsetMM = Field(default_factory=OffsetMM)
-    color: str | None = Field(default=None, max_length=128)
+    # The new workbench only writes ColorMode values. Keep prior named colours
+    # readable so legacy projects can still use their legacy export route.
+    color: ColorMode | str = 'original'
+    lock_aspect: bool = True
+
+    @field_validator('color', mode='before')
+    @classmethod
+    def normalise_legacy_color(cls, value):
+        return 'original' if value is None else value
 
 
 class Inputs(Model):
@@ -96,11 +108,27 @@ class Asset(Model):
     _paths = field_validator('source_svg','source_preview')(relative_asset_path)
 
 
+class VersionManifest(Model):
+    version_id: str = Field(pattern=r'^version-\d{4}$')
+    number: int = Field(ge=1)
+    created_at: str
+    source_revision: int = Field(ge=0)
+    preview_path: str
+    snapshot_path: str
+    output_filename: str
+    logo_width_mm: float = Field(ge=0)
+    logo_height_mm: float = Field(ge=0)
+    color: ColorMode = 'original'
+    read_only: bool = False
+
+
 class Project(Model):
-    schema_version: int = 2
+    schema_version: int = 3
     revision: int = Field(default=0, ge=0)
     updated_at: str = ''
     name: str = Field(default='', max_length=100)
+    status: TaskStatus = 'editing'
+    next_version_number: int = Field(default=1, ge=1)
     inputs: Inputs = Field(default_factory=Inputs)
     calibration: Calibration = Field(default_factory=Calibration)
     frames: list[Frame] = Field(default_factory=list, max_length=100)

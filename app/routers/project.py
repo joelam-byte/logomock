@@ -113,7 +113,7 @@ def _commit(name, item, current_revision):
         raise AppError('REVISION_CONFLICT', '项目已在其他窗口更新，请重新打开；当前修改未覆盖新版本',current_revision=current_revision)
     item = normalize_geometry(item)
     item.name = _sanitize(name)
-    item.schema_version = 2
+    item.schema_version = 3
     item.revision = current_revision + 1
     item.updated_at = datetime.now(timezone.utc).isoformat()
     # Validate calculated values too (overflow or extreme aspect ratios).
@@ -145,6 +145,8 @@ def create(name):
 
 @router.get('')
 def list_projects():
+    from app.services import version_store
+
     items = []
     if PROJECTS_DIR.is_dir():
         for folder in PROJECTS_DIR.iterdir():
@@ -152,8 +154,10 @@ def list_projects():
                 continue
             try:
                 p = load(folder.name)
+                version_count, preview_path = version_store.summary(folder.name)
                 items.append(dict(name=p.name,revision=p.revision,updated_at=p.updated_at,
-                                  has_bag=bool(p.inputs.bag_image),has_logo=bool(p.inputs.logo_svg)))
+                                  has_bag=bool(p.inputs.bag_image),has_logo=bool(p.inputs.logo_svg),
+                                  status=p.status,version_count=version_count,preview_path=preview_path))
             except AppError:
                 continue
     return {'ok':True,'data':sorted(items,key=lambda p:(p['updated_at'],p['name']),reverse=True)}
