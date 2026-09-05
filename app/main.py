@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import HOST, PORT, WEB_DIR
-from app.routers import convert, export, health, project, upload
+from app.routers import convert, export, health, project, upload, version
 from app.services.errors import AppError
 
 
@@ -57,6 +57,7 @@ app.include_router(project.router)
 app.include_router(upload.router)
 app.include_router(convert.router)
 app.include_router(export.router)
+app.include_router(version.router)
 
 
 @app.exception_handler(AppError)

@@ -1,11 +1,27 @@
 import json
 
 import pytest
+from fastapi.testclient import TestClient
 from PIL import Image
 
+from app.main import app
+from app.models import Project
 from app.routers import project as repo
 from app.services import version_store as versions
 from app.services.errors import AppError
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(repo, 'PROJECTS_DIR', tmp_path / 'projects')
+    with TestClient(app) as value:
+        yield value
+
+
+def data(response):
+    body = response.json()
+    assert body['ok'], body
+    return body['data']
 
 
 def test_committed_version_restores_draft_and_keeps_customer_png(tmp_path, monkeypatch):
@@ -67,3 +83,24 @@ def test_version_store_ignores_incomplete_staging_and_rejects_tampered_manifest(
     assert error.value.code == 'INVALID_PAYLOAD'
     with pytest.raises(AppError):
         versions.delete_version('sample', '../project.json')
+
+
+def test_version_routes_restore_only_from_current_revision(client, tmp_path):
+    source = data(client.post('/api/projects', json={'name': 'sample'}))
+    delivered = tmp_path / 'sent.png'
+    versions.commit_version(
+        'sample', Project.model_validate(source), Image.new('RGBA', (20, 20), 'white'), 'sent.png', delivered
+    )
+
+    listed = data(client.get('/api/projects/sample/versions'))
+    assert listed[0]['version_id'] == 'version-0001'
+
+    stale = client.post('/api/projects/sample/versions/version-0001/restore', json={'revision': 0}).json()
+    assert stale['ok'] is False
+    assert stale['error']['code'] == 'REVISION_CONFLICT'
+
+    current = data(client.get('/api/projects/sample'))
+    restored = data(client.post('/api/projects/sample/versions/version-0001/restore', json={'revision': current['revision']}))
+    assert restored['revision'] == current['revision'] + 1
+
+    assert data(client.delete('/api/projects/sample/versions/version-0001')) == {'deleted': 'version-0001'}
