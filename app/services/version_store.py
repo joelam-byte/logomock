@@ -69,17 +69,50 @@ def _cleanup_interrupted_staging(name: str) -> None:
 
 def list_versions(name: str) -> list[VersionManifest]:
     versions_dir = project.project_dir(name) / 'versions'
-    if not versions_dir.is_dir():
+    results = []
+    if versions_dir.is_dir():
+        for folder in versions_dir.iterdir():
+            if not folder.is_dir() or not VERSION_ID.fullmatch(folder.name):
+                continue
+            try:
+                results.append(_read_manifest(name, folder.name))
+            except AppError:
+                continue
+    return sorted(results, key=lambda item: item.number, reverse=True) + legacy_manifests(name)
+
+
+def legacy_manifests(name: str) -> list[VersionManifest]:
+    """Expose complete V1 export folders as restore-only version records."""
+    output = project.project_dir(name) / 'output'
+    if not output.is_dir():
         return []
     results = []
-    for folder in versions_dir.iterdir():
-        if not folder.is_dir() or not VERSION_ID.fullmatch(folder.name):
+    for folder in sorted(output.glob('export-*'), reverse=True):
+        if not folder.is_dir():
+            continue
+        snapshot_path = folder / 'snapshot.json'
+        preview = next(iter(sorted(folder.glob('mockup-*.png'))), None)
+        if not snapshot_path.is_file() or preview is None or not preview.is_file():
             continue
         try:
-            results.append(_read_manifest(name, folder.name))
-        except AppError:
+            snapshot = Project.model_validate_json(snapshot_path.read_text(encoding='utf-8'))
+            scheme = snapshot.schemes[0] if len(snapshot.schemes) == 1 else None
+            results.append(VersionManifest(
+                version_id=f'legacy-{folder.name}',
+                number=0,
+                created_at=datetime.fromtimestamp(folder.stat().st_mtime, timezone.utc).isoformat(),
+                source_revision=snapshot.revision,
+                preview_path=preview.relative_to(project.project_dir(name)).as_posix(),
+                snapshot_path=snapshot_path.relative_to(project.project_dir(name)).as_posix(),
+                output_filename=preview.name,
+                logo_width_mm=scheme.size_mm.w if scheme else 0,
+                logo_height_mm=scheme.size_mm.h if scheme else 0,
+                color=scheme.color if scheme and scheme.color in {'original', 'black', 'white', 'gray'} else 'original',
+                read_only=True,
+            ))
+        except (OSError, ValidationError, ValueError):
             continue
-    return sorted(results, key=lambda item: item.number, reverse=True)
+    return results
 
 
 def summary(name: str) -> tuple[int, str | None]:
@@ -207,7 +240,12 @@ def commit_version(
 
 
 def load_version(name: str, version_id: str) -> tuple[VersionManifest, Project]:
-    manifest = _read_manifest(name, version_id)
+    if version_id.startswith('legacy-'):
+        manifest = next((item for item in legacy_manifests(name) if item.version_id == version_id), None)
+        if manifest is None:
+            raise AppError(FILE_NOT_FOUND, '版本存档不存在')
+    else:
+        manifest = _read_manifest(name, version_id)
     try:
         snapshot = Project.model_validate_json(project.safe_file(name, manifest.snapshot_path).read_text(encoding='utf-8'))
     except (OSError, ValidationError, ValueError) as exc:
@@ -230,6 +268,8 @@ def restore_version(name: str, version_id: str, expected_revision: int) -> Proje
 
 
 def delete_version(name: str, version_id: str) -> None:
+    if version_id.startswith('legacy-'):
+        raise AppError(INVALID_PAYLOAD, '旧版导出只读，不能删除')
     with project.storage_lock():
         folder = version_dir(name, version_id)
         if not folder.is_dir():

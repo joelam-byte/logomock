@@ -104,3 +104,19 @@ def test_version_routes_restore_only_from_current_revision(client, tmp_path):
     assert restored['revision'] == current['revision'] + 1
 
     assert data(client.delete('/api/projects/sample/versions/version-0001')) == {'deleted': 'version-0001'}
+
+
+def test_legacy_output_snapshot_is_listed_read_only_and_can_restore(client):
+    project = data(client.post('/api/projects', json={'name': 'sample'}))
+    legacy = repo.project_dir('sample') / 'output' / 'export-legacy'
+    legacy.mkdir(parents=True)
+    repo.atomic_write_json(legacy / 'snapshot.json', project)
+    Image.new('RGBA', (20, 20), 'white').save(legacy / 'mockup-01-A.png')
+
+    item = data(client.get('/api/projects/sample/versions'))[0]
+
+    assert item['version_id'] == 'legacy-export-legacy'
+    assert item['read_only'] is True
+    assert data(client.post(f"/api/projects/sample/versions/{item['version_id']}/restore", json={'revision': project['revision']}))
+    deleted = client.delete(f"/api/projects/sample/versions/{item['version_id']}").json()
+    assert deleted['ok'] is False

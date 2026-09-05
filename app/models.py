@@ -109,8 +109,10 @@ class Asset(Model):
 
 
 class VersionManifest(Model):
-    version_id: str = Field(pattern=r'^version-\d{4}$')
-    number: int = Field(ge=1)
+    version_id: str = Field(min_length=1, max_length=160)
+    # Legacy V1 exports have no intrinsic sequence number and use zero only
+    # while marked read-only; modern version folders still enforce >= 1.
+    number: int = Field(ge=0)
     created_at: str
     source_revision: int = Field(ge=0)
     preview_path: str
