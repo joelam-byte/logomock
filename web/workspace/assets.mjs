@@ -12,6 +12,101 @@ export class SelectionReview {
  }
 }
 
+export function mergeCandidateIds(selected, candidateId) {
+ const next=new Set(selected);
+ if(next.has(candidateId))next.delete(candidateId);else next.add(candidateId);
+ return next;
+}
+
+export function pickerReady(selected) {
+ return selected.size>0;
+}
+
+export function logoPickerDialog(project,applyCandidateIds) {
+ const asset=project.asset;
+ if(!asset)return;
+ const pages=asset.pages||[];
+ const first=pages.find(page=>!page.error&&page.candidates?.length);
+ if(!first)return;
+ let activePageId=first.id;
+ let selected=new Set(asset.selected_candidate_ids||[]);
+ let applying=false;
+ let previewToken=0;
+ const root=dialog('选择 Logo 内容',{canClose:()=>!applying});
+ const grid=el('div','logo-picker-grid');
+ const pagesColumn=el('section','picker-pages');
+ const candidatesColumn=el('section','picker-candidates');
+ const previewColumn=el('section','picker-preview');
+ const pageList=el('div','picker-page-list');
+ const candidateList=el('div','picker-candidate-list');
+ const count=el('p','muted');
+ const preview=el('canvas','picker-preview-canvas');
+ preview.width=480;
+ preview.height=250;
+ pagesColumn.append(el('h3','','页面'),pageList);
+ candidatesColumn.append(el('h3','','候选内容'),candidateList);
+ previewColumn.append(el('h3','','已选预览'),count,preview);
+ grid.append(pagesColumn,candidatesColumn,previewColumn);
+ root.append(grid);
+ const footer=el('div','dialog-footer');
+ const submit=button('确认使用',async()=>{
+  if(applying||!pickerReady(selected))return;
+  applying=true;render();
+  try{await applyCandidateIds([...selected]);closeDialog();}catch(error){dialogError(root,error);}finally{applying=false;render();}
+ },'primary');
+ footer.append(button('取消',closeDialog),submit);root.append(footer);
+
+ function currentPage(){return pages.find(page=>page.id===activePageId)||first;}
+ function selectedCandidates(){return pages.flatMap(page=>page.candidates||[]).filter(candidate=>selected.has(candidate.id));}
+ function drawPreview(){
+  const token=++previewToken,items=selectedCandidates();
+  const context=preview.getContext('2d');
+  context.clearRect(0,0,preview.width,preview.height);
+  if(!items.length)return;
+  Promise.all(items.map(candidate=>new Promise(resolve=>{
+   if(!candidate.preview)return resolve(null);
+   const image=new Image();
+   image.onload=()=>resolve(image);image.onerror=()=>resolve(null);image.src=fileURL(project,candidate.preview);
+  }))).then(images=>{
+   if(token!==previewToken)return;
+   context.clearRect(0,0,preview.width,preview.height);
+   const loaded=images.filter(Boolean);
+   if(!loaded.length)return;
+   const slotWidth=preview.width/loaded.length;
+   for(const [index,image]of loaded.entries()){
+    const scale=Math.min((slotWidth-24)/image.naturalWidth,(preview.height-24)/image.naturalHeight);
+    const width=image.naturalWidth*scale,height=image.naturalHeight*scale;
+    context.drawImage(image,index*slotWidth+(slotWidth-width)/2,(preview.height-height)/2,width,height);
+   }
+  });
+ }
+ function render(){
+  const page=currentPage();
+  pageList.replaceChildren();
+  for(const item of pages){
+   const label=item.error?`${item.label} · 无法读取`:item.label;
+   const row=button(label,()=>{activePageId=item.id;render();},`picker-page${item.id===page.id?' active':''}`);
+   row.disabled=Boolean(item.error)||applying;
+   pageList.append(row);
+   if(item.error)pageList.append(el('p','picker-page-error',item.error));
+  }
+  candidateList.replaceChildren();
+  for(const candidate of page.candidates||[]){
+   const row=el('label',`picker-candidate${selected.has(candidate.id)?' selected':''}`),check=el('input');
+   check.type='checkbox';check.checked=selected.has(candidate.id);check.disabled=applying;
+   check.onchange=()=>{selected=mergeCandidateIds(selected,candidate.id);render();};
+   row.append(check);
+   if(candidate.preview){const image=el('img');image.src=fileURL(project,candidate.preview);image.alt='候选内容预览';row.append(image);}
+   row.append(el('span','',candidate.label));candidateList.append(row);
+  }
+  if(!(page.candidates||[]).length)candidateList.append(el('p','empty-note','此页没有可用的候选内容。'));
+  count.textContent=pickerReady(selected)?`已选 ${selected.size} 项`:'请选择至少一项';
+  submit.disabled=applying||!pickerReady(selected);submit.textContent=applying?'正在应用…':'确认使用';
+  drawPreview();
+ }
+ render();
+}
+
 export function cleanupDialog(project,apply){
  const asset=project.asset;if(!asset)return;
  const review=new SelectionReview(asset.selected_ids||[],()=>render());

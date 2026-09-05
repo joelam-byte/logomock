@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { nextPrimaryAction, canCustomerExport, suggestedFilename } from '../web/workspace/state.mjs';
+import { mergeCandidateIds, pickerReady } from '../web/workspace/assets.mjs';
 
 const readyProject = () => ({
   name: '客户 A',
@@ -38,4 +39,11 @@ test('customer export requires one calibrated active placement', () => {
 
 test('suggested customer image uses the task name', () => {
   assert.equal(suggestedFilename(readyProject()), '客户 A_效果图.png');
+});
+
+test('candidate selection is page-aware and needs no raw object tools', () => {
+  const selected = mergeCandidateIds(new Set(['page-0001--candidate-1']), 'page-0002--candidate-2');
+  assert.deepEqual([...selected].sort(), ['page-0001--candidate-1', 'page-0002--candidate-2']);
+  assert.equal(pickerReady(selected), true);
+  assert.equal(pickerReady(new Set()), false);
 });
