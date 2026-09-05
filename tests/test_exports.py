@@ -4,7 +4,7 @@ from xml.etree import ElementTree as ET
 from PIL import Image
 
 from app.models import Scheme,Rect,Frame
-from app.services import spec_svg,placement_svg,selection_png
+from app.services import customer_export, placement_svg, save_dialog, selection_png, spec_svg
 
 NS='{http://www.w3.org/2000/svg}'
 
@@ -67,3 +67,44 @@ def test_large_logo_downsampling_averages_fine_detail_without_aliasing(tmp_path)
     result=selection_png.render(bag,art,scheme)
     values=[result.getpixel((x,8))[0] for x in range(2,14)]
     assert all(100<value<155 for value in values),values
+
+
+def test_customer_confirmation_has_logo_and_numeric_mm_annotation_without_guides(tmp_path):
+    bag = tmp_path / 'bag.png'
+    logo_file = tmp_path / 'logo.png'
+    Image.new('RGB', (240, 180), '#d8c3a9').save(bag)
+    Image.new('RGBA', (40, 20), (0, 0, 255, 255)).save(logo_file)
+    scheme = Scheme(logo_px={'x': 80, 'y': 60, 'w': 80, 'h': 40}, size_mm={'w': 50, 'h': 25})
+
+    image = customer_export.render_confirmation(bag, logo_file, scheme, None)
+
+    assert image.size == (240, 180)
+    assert image.getpixel((120, 80))[:3] == (0, 0, 255)
+    assert image.getpixel((0, 0))[:3] == (216, 195, 169)
+    assert customer_export.annotation_text(scheme) == '50 × 25 mm'
+
+
+def test_tinted_confirmation_uses_logo_alpha_not_original_blue_pixels(tmp_path):
+    bag = tmp_path / 'bag.png'
+    logo_file = tmp_path / 'logo.png'
+    Image.new('RGB', (160, 100), '#d8c3a9').save(bag)
+    Image.new('RGBA', (20, 10), (0, 0, 255, 255)).save(logo_file)
+    scheme = Scheme(color='white', logo_px={'x': 50, 'y': 30, 'w': 40, 'h': 20}, size_mm={'w': 50, 'h': 25})
+
+    image = customer_export.render_confirmation(bag, logo_file, scheme, None)
+
+    assert image.getpixel((70, 40))[:3] == (255, 255, 255)
+
+
+def test_save_dialog_returns_none_when_the_user_cancels(monkeypatch):
+    class Root:
+        def withdraw(self):
+            pass
+
+        def destroy(self):
+            pass
+
+    monkeypatch.setattr(save_dialog.tk, 'Tk', Root)
+    monkeypatch.setattr(save_dialog.filedialog, 'asksaveasfilename', lambda **_kwargs: '')
+
+    assert save_dialog.choose_png_destination('customer.png') is None

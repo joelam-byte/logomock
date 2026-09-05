@@ -1,14 +1,17 @@
 """Clean product renders. No editor guides or document annotations exist here."""
 from pathlib import Path
 from math import ceil
+from collections.abc import Callable
 from PIL import Image,ImageDraw,ImageFont
 
 
-def render(bag_path,logo_path,scheme,crop=None):
+def render(bag_path,logo_path,scheme,crop=None,*,tint: Callable[[Image.Image, str], Image.Image] | None = None):
     with Image.open(bag_path) as image:
         bag=image.convert('RGBA')
     with Image.open(logo_path) as image:
         logo=image.convert('RGBA')
+    if tint is not None and scheme.color != 'original':
+        logo=tint(logo,scheme.color)
     rect=scheme.logo_px
     if rect.w<=0 or rect.h<=0:
         raise ValueError('Logo 尺寸必须大于零')
