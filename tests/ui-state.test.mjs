@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { nextPrimaryAction, canCustomerExport, suggestedFilename } from '../web/workspace/state.mjs';
 import { mergeCandidateIds, pickerReady } from '../web/workspace/assets.mjs';
+import { formatVersionLabel, versionActionState } from '../web/workspace/versions.mjs';
 
 const readyProject = () => ({
   name: '客户 A',
@@ -46,4 +47,11 @@ test('candidate selection is page-aware and needs no raw object tools', () => {
   assert.deepEqual([...selected].sort(), ['page-0001--candidate-1', 'page-0002--candidate-2']);
   assert.equal(pickerReady(selected), true);
   assert.equal(pickerReady(new Set()), false);
+});
+
+test('version UI protects read-only legacy records and formats internal labels', () => {
+  assert.equal(formatVersionLabel({ number: 2, read_only: false }), '第 2 版');
+  assert.equal(versionActionState({ read_only: true }).canDelete, false);
+  assert.equal(versionActionState({ read_only: true }).canRestore, true);
+  assert.equal(versionActionState({ read_only: false }).canDelete, true);
 });

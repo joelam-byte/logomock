@@ -9,6 +9,10 @@ export class SaveQueue {
 }
 export async function api(path,{method='GET',body}={}) {const options={method};if(body instanceof FormData)options.body=body;else if(body!==undefined){options.body=JSON.stringify(body);options.headers={'Content-Type':'application/json'};}let response;try{response=await fetch(path,options);}catch{throw new Error('无法连接本地服务，请确认 LogoMock 正在运行。');}let result;try{result=await response.json();}catch{throw new Error(`服务返回无效响应 (${response.status})`);}if(!response.ok||!result.ok)throw Object.assign(new Error(result.error?.message||`请求失败 (${response.status})`),{code:result.error?.code});return result.data;}
 export const projectURL = name => `/api/projects/${encodeURIComponent(name)}`;
+export const customerExport = (project,filename) => api(projectURL(project.name)+'/customer-export',{method:'POST',body:{revision:project.revision,filename}});
+export const listVersions = name => api(projectURL(name)+'/versions');
+export const restoreVersion = (project,versionId) => api(projectURL(project.name)+`/versions/${encodeURIComponent(versionId)}/restore`,{method:'POST',body:{revision:project.revision}});
+export const deleteVersion = (name,versionId) => api(projectURL(name)+`/versions/${encodeURIComponent(versionId)}`,{method:'DELETE'});
 export async function runExclusive(state,work,onBusyChange=()=>{}){
  if(state.busy)throw Object.assign(new Error('当前操作尚未完成，请稍后再试。'),{code:'OPERATION_BUSY'});
  state.busy=true;
