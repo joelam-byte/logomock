@@ -25,6 +25,7 @@ _qa/
 _probe/
 backups/
 .superpowers/
+.worktrees/
 
 # Original test artwork kept only on this workstation
 测试/
