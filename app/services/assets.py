@@ -8,7 +8,7 @@ from xml.etree import ElementTree as ET
 
 from PIL import Image
 
-from app.models import Asset, AssetObject, Candidate, Rect
+from app.models import Asset, AssetObject, AssetPage, Candidate, Rect
 from app.services import svg_document as svg
 from app.services.raster_assets import clean_raster, component_images
 
@@ -90,6 +90,48 @@ def group_candidates(objects):
     return [Candidate(id=f'candidate-{index+1}',label=f'候选 Logo {index+1}',
                       object_ids=[obj.id for obj in group],box=union_box(obj.box for obj in group))
             for index,group in enumerate(groups)]
+
+
+def group_page_candidates(root, objects, *, page_id, page_number):
+    """Create generic, non-overlapping page candidates from source groups and hints."""
+    by_id = {obj.id: obj for obj in objects}
+    candidates = []
+    consumed = set()
+    group_number = 0
+    object_number = 0
+
+    def append(label, members):
+        nonlocal group_number
+        if not members:
+            return
+        group_number += 1
+        candidates.append(Candidate(
+            id=f'{page_id}--candidate-{group_number}',
+            label=label or f'组 {group_number}',
+            object_ids=[obj.id for obj in members],
+            box=union_box(obj.box for obj in members),
+        ))
+
+    for source_label, identifiers in svg.candidate_seed_ids(root):
+        members = [by_id[ident] for ident in identifiers if ident in by_id]
+        normal = [obj for obj in members if obj.reason is None]
+        hinted = [obj for obj in members if obj.reason in {'background', 'dimension'}]
+        append(source_label, normal)
+        for obj in hinted:
+            object_number += 1
+            append(f'对象 {object_number}', [obj])
+        consumed.update(obj.id for obj in members)
+
+    leftovers = [obj for obj in objects if obj.id not in consumed]
+    for candidate in group_candidates(leftovers):
+        append('', [by_id[ident] for ident in candidate.object_ids])
+    return AssetPage(
+        id=page_id,
+        number=page_number,
+        label=f'页面 {page_number}',
+        objects=objects,
+        candidates=candidates,
+    )
 
 
 def _raster_source(image):

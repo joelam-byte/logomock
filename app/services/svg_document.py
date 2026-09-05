@@ -111,6 +111,76 @@ def serialize(root):
     return ET.tostring(root,encoding='unicode',xml_declaration=False)
 
 
+def prefix_ids(root, prefix):
+    """Copy an SVG page and namespace every local id/reference for composition."""
+    result = copy.deepcopy(root)
+    id_map = {node.get('id'): prefix + node.get('id') for node in result.iter() if node.get('id')}
+
+    def rewrite_urls(value):
+        return re.sub(
+            r'url\(\s*(["\']?)#([^\s"\')]+)\1\s*\)',
+            lambda match: 'url(#' + id_map.get(match[2], match[2]) + ')',
+            value,
+        )
+
+    for node in result.iter():
+        for key, value in list(node.attrib.items()):
+            attr = key.rsplit('}', 1)[-1]
+            if attr == 'id':
+                node.set(key, id_map[value])
+            elif attr == 'href' and value.startswith('#'):
+                node.set(key, '#' + id_map.get(value[1:], value[1:]))
+            else:
+                node.set(key, rewrite_urls(value))
+        if tag(node) == 'style' and node.text:
+            text = rewrite_urls(node.text)
+            for old, new in id_map.items():
+                text = re.sub(r'#' + re.escape(old) + r'(?![\w-])', '#' + new, text)
+            node.text = text
+    return result
+
+
+def candidate_seed_ids(root):
+    """Return document-order non-overlapping drawable groups, preferring source <g>s."""
+    claimed = set()
+    seeds = []
+
+    def descendants(node):
+        kind = tag(node)
+        if kind in NONRENDER:
+            return
+        if kind in DRAWABLE:
+            ident = node.get('id')
+            if ident:
+                yield ident
+            return
+        for child in node:
+            yield from descendants(child)
+
+    def group_label(node):
+        for key, value in node.attrib.items():
+            if key.rsplit('}', 1)[-1] == 'label' and value:
+                return value
+        ident = node.get('id', '')
+        return ident.rsplit('--', 1)[-1] if ident else ''
+
+    def visit(node):
+        for child in node:
+            visit(child)
+        if tag(node) != 'g':
+            return
+        available = [ident for ident in descendants(node) if ident not in claimed]
+        if len(available) >= 2:
+            seeds.append((group_label(node), available))
+            claimed.update(available)
+
+    visit(root)
+    for ident in descendants(root):
+        if ident not in claimed:
+            seeds.append(('', [ident]))
+    return seeds
+
+
 def select_svg(root, selected_ids, box):
     result=copy.deepcopy(root)
     available={n.get('id') for n in drawable_elements(result)}

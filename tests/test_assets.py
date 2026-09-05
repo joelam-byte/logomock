@@ -5,8 +5,9 @@ import pytest
 from PIL import Image, ImageDraw
 from pypdf import PdfWriter
 
-from app.models import Rect
+from app.models import AssetObject, Rect
 from app.services import pdf_pages
+from app.services import assets, svg_document as svg
 from app.services.svg_document import prepare_svg, select_svg
 from app.services.assets import classify_objects, group_candidates
 from app.services.raster_assets import clean_raster
@@ -23,6 +24,29 @@ def test_page_count_reads_all_pdf_pages(tmp_path):
         writer.write(stream)
 
     assert pdf_pages.page_count(source) == 2
+
+
+def test_grouped_wordmark_is_one_candidate_but_nested_background_is_separate(tmp_path):
+    source = tmp_path / 'source.svg'
+    source.write_text('''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">
+      <g id="logo"><rect id="background" width="200" height="100" fill="white"/>
+        <g id="word"><path id="s" d="M20 20h10v20H20z"/><path id="t" d="M35 20h10v20H35z"/></g>
+      </g><text id="dimension" x="20" y="90">50 mm</text>
+    </svg>''')
+    root = svg.prefix_ids(svg.prepare_svg(source), 'page-0001--')
+    objects = [
+        AssetObject(id='page-0001--background', label='对象 1', box={'x': 0, 'y': 0, 'w': 200, 'h': 100}, reason='background', selected=False),
+        AssetObject(id='page-0001--s', label='对象 2', box={'x': 20, 'y': 20, 'w': 10, 'h': 20}, selected=True),
+        AssetObject(id='page-0001--t', label='对象 3', box={'x': 35, 'y': 20, 'w': 10, 'h': 20}, selected=True),
+        AssetObject(id='page-0001--dimension', label='对象 4', box={'x': 20, 'y': 82, 'w': 40, 'h': 8}, reason='dimension', selected=False),
+    ]
+
+    page = assets.group_page_candidates(root, objects, page_id='page-0001', page_number=1)
+    by_members = {frozenset(candidate.object_ids) for candidate in page.candidates}
+
+    assert frozenset({'page-0001--s', 'page-0001--t'}) in by_members
+    assert frozenset({'page-0001--background'}) in by_members
+    assert frozenset({'page-0001--dimension'}) in by_members
 
 
 def test_svg_selection_preserves_group_transforms_defs_and_nonzero_origin(tmp_path):
