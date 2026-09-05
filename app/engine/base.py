@@ -27,6 +27,10 @@ class VectorEngine(Protocol):
         """任意受支持的源格式 → SVG。失败抛 EngineError。"""
         ...
 
+    def to_svg_page(self, src: Path, svg: Path, page_number: int) -> None:
+        """PDF-compatible source 的指定 1-based 页 → SVG。"""
+        ...
+
     def svg_to_pdf(self, svg: Path, pdf: Path, *, text_to_path: bool = True) -> None:
         """SVG → PDF，可选转曲（默认转曲）。失败抛 EngineError。"""
         ...

@@ -3,13 +3,26 @@ from xml.etree import ElementTree as ET
 
 import pytest
 from PIL import Image, ImageDraw
+from pypdf import PdfWriter
 
 from app.models import Rect
+from app.services import pdf_pages
 from app.services.svg_document import prepare_svg, select_svg
 from app.services.assets import classify_objects, group_candidates
 from app.services.raster_assets import clean_raster
 
 NS = '{http://www.w3.org/2000/svg}'
+
+
+def test_page_count_reads_all_pdf_pages(tmp_path):
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.add_blank_page(width=100, height=100)
+    source = tmp_path / 'two-pages.pdf'
+    with source.open('wb') as stream:
+        writer.write(stream)
+
+    assert pdf_pages.page_count(source) == 2
 
 
 def test_svg_selection_preserves_group_transforms_defs_and_nonzero_origin(tmp_path):

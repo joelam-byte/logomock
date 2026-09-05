@@ -69,6 +69,18 @@ class InkscapeEngine:
     def to_svg(self,src,svg):
         self._export(src,svg,'svg')
 
+    def to_svg_page(self,src,svg,page_number):
+        if page_number < 1:
+            raise ValueError('PDF 页码从 1 开始')
+        failures=[]
+        for flag in (f'--pages={page_number}',f'--pdf-page={page_number}'):
+            try:
+                self._export(src,svg,'svg',(flag,))
+                return
+            except EngineError as exc:
+                failures.append(exc.stderr or exc.message)
+        raise EngineError(CONVERT_FAILED,f'无法读取第 {page_number} 页',stderr='\n'.join(failures))
+
     def svg_to_pdf(self,svg,pdf,*,text_to_path=True):
         self._export(svg,pdf,'pdf',['--export-text-to-path'] if text_to_path else [])
 
