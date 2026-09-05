@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectRect, canonicalScheme, resizeAspect, newScheme, reproject, exportReady, History } from '../web/workspace/geometry.mjs';
+import { projectRect, canonicalScheme, resizeAspect, resizeFromHandle, newScheme, reproject, exportReady, History } from '../web/workspace/geometry.mjs';
 import { SaveQueue, runExclusive } from '../web/workspace/persistence.mjs';
 import { SelectionReview } from '../web/workspace/assets.mjs';
 import { Editor } from '../web/workspace/editor.mjs';
@@ -15,6 +15,17 @@ test('aspect resize stays positive and a new scheme is centered with physical si
  assert.deepEqual(resizeAspect({x:0,y:0,w:100,h:50},160,80,2),{x:0,y:0,w:160,h:80});
  const s=newScheme(fixture(),'f','s'); assert.deepEqual(s.size_mm,{w:50,h:25}); assert.deepEqual(s.logo_px,{x:180,y:315,w:100,h:50});
  assert.equal(newScheme({...fixture(),calibration:{width_mm:0}},'f','bad'),null);
+});
+test('corner resize keeps logo aspect when the lock is on',()=>{
+ assert.deepEqual(resizeFromHandle({x:10,y:20,w:100,h:50},'se',{x:50,y:20},2,true),{x:10,y:20,w:150,h:75});
+});
+test('east handle changes only width when the aspect lock is off',()=>{
+ assert.deepEqual(resizeFromHandle({x:10,y:20,w:100,h:50},'e',{x:30,y:0},2,false),{x:10,y:20,w:130,h:50});
+});
+test('new placement starts with the original Logo color and aspect lock',()=>{
+ const s=newScheme(fixture(),'f','s');
+ assert.equal(s.color,'original');
+ assert.equal(s.lock_aspect,true);
 });
 test('calibration edits preserve physical size and offset',()=>{
  const p=fixture(); p.schemes=[{id:'s',frame_id:'f',size_mm:{w:40,h:20},offset_mm:{left:15,bottom:25}}]; p.calibration.width_mm=150;
