@@ -93,19 +93,93 @@ class Candidate(Model):
     _paths = field_validator('preview')(relative_asset_path)
 
 
-class Asset(Model):
+class AssetPage(Model):
     id: str
-    source_svg: str
-    source_preview: str
-    kind: Literal['vector','raster'] = 'vector'
-    width: float = Field(gt=0)
-    height: float = Field(gt=0)
-    source_box: Rect
+    number: int = Field(ge=1)
+    label: str
+    source_svg: str | None = None
+    source_preview: str | None = None
+    source_box: Rect | None = None
     objects: list[AssetObject] = Field(default_factory=list)
     candidates: list[Candidate] = Field(default_factory=list)
+    error: str | None = None
+    _paths = field_validator('source_svg', 'source_preview')(relative_asset_path)
+
+
+class Asset(Model):
+    id: str
+    kind: Literal['vector','raster'] = 'vector'
+    pages: list[AssetPage] = Field(default_factory=list)
+    selected_candidate_ids: list[str] = Field(default_factory=list)
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
     selected_ids: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    _paths = field_validator('source_svg','source_preview')(relative_asset_path)
+
+    @model_validator(mode='before')
+    @classmethod
+    def migrate_single_page(cls, value):
+        if not isinstance(value, dict) or value.get('pages'):
+            return value
+        if not any(key in value for key in ('source_svg', 'source_preview', 'objects', 'candidates')):
+            return value
+        data = dict(value)
+        candidates = data.get('candidates') or []
+        selected_ids = data.get('selected_ids') or []
+        data['pages'] = [{
+            'id': 'page-0001',
+            'number': 1,
+            'label': '页面 1',
+            'source_svg': data.get('source_svg'),
+            'source_preview': data.get('source_preview'),
+            'source_box': data.get('source_box'),
+            'objects': data.get('objects') or [],
+            'candidates': candidates,
+        }]
+        if 'selected_candidate_ids' not in data:
+            selected = set(selected_ids)
+            data['selected_candidate_ids'] = [
+                (candidate.get('id') if isinstance(candidate, dict) else candidate.id)
+                for candidate in candidates
+                if set(candidate.get('object_ids') if isinstance(candidate, dict) else candidate.object_ids) == selected
+            ]
+        return data
+
+    def _first_page(self) -> AssetPage:
+        if not self.pages:
+            raise ValueError('素材没有可用页面')
+        return self.pages[0]
+
+    # Temporary compatibility accessors keep the existing import/export path
+    # working while it is upgraded to the page-oriented API below.
+    @property
+    def source_svg(self) -> str:
+        value = self._first_page().source_svg
+        if value is None:
+            raise ValueError('素材页面没有 SVG 源文件')
+        return value
+
+    @property
+    def source_preview(self) -> str:
+        value = self._first_page().source_preview
+        if value is None:
+            raise ValueError('素材页面没有预览图')
+        return value
+
+    @property
+    def source_box(self) -> Rect:
+        value = self._first_page().source_box
+        if value is None:
+            raise ValueError('素材页面没有可用画板')
+        return value
+
+    @property
+    def objects(self) -> list[AssetObject]:
+        return self._first_page().objects
+
+    @property
+    def candidates(self) -> list[Candidate]:
+        return self._first_page().candidates
 
 
 class VersionManifest(Model):

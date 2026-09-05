@@ -90,6 +90,26 @@ def test_legacy_named_logo_color_remains_readable():
     assert project.schemes[0].color == 'PANTONE 186 C'
 
 
+def test_v2_asset_is_exposed_as_one_page_without_rewriting_disk(client):
+    path = repo.PROJECTS_DIR / 'legacy' / 'project.json'
+    path.parent.mkdir(parents=True)
+    original = json.dumps({
+        'name': 'legacy',
+        'asset': {
+            'id': 'a', 'kind': 'vector', 'source_svg': 'input/source.svg',
+            'source_preview': 'input/source.png', 'width': 40, 'height': 20,
+            'source_box': {'x': 0, 'y': 0, 'w': 40, 'h': 20},
+            'objects': [], 'candidates': [], 'selected_ids': [], 'warnings': [],
+        },
+    })
+    path.write_text(original, encoding='utf-8')
+
+    loaded = data(client.get('/api/projects/legacy'))
+
+    assert loaded['asset']['pages'][0]['number'] == 1
+    assert path.read_text(encoding='utf-8') == original
+
+
 def test_project_list_exposes_version_summary_without_reading_output_files(client):
     data(client.post('/api/projects', json={'name': 'sample'}))
 
