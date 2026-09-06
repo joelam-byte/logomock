@@ -30,6 +30,7 @@ class Rect(Model):
 
 class Calibration(Model):
     product_frame: Rect = Field(default_factory=Rect)
+    locked: bool = False
     width_mm: float = Field(default=0, ge=0)
     height_mm: float | None = Field(default=None, ge=0)
     px_per_mm: float = Field(default=0, ge=0)
@@ -38,6 +39,7 @@ class Calibration(Model):
 class Frame(Rect):
     id: str = Field(default='', max_length=100)
     name: str = Field(default='', max_length=200)
+    locked: bool = False
 
 
 class SizeMM(Model):
@@ -209,7 +211,6 @@ class Project(Model):
     calibration: Calibration = Field(default_factory=Calibration)
     frames: list[Frame] = Field(default_factory=list, max_length=100)
     schemes: list[Scheme] = Field(default_factory=list, max_length=100)
-    crop: Rect | None = None
     asset: Asset | None = None
 
     @model_validator(mode='after')

@@ -52,7 +52,6 @@ async def upload_bag(name: str, file: UploadFile = File(...)):
     item.calibration = Calibration()
     item.frames = []
     item.schemes = []
-    item.crop = None
     return {'ok':True,'data':project.save(name,item).model_dump()}
 
 

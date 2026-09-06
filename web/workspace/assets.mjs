@@ -18,6 +18,56 @@ export function mergeCandidateIds(selected, candidateId) {
  return next;
 }
 
+export function pageSelections(asset) {
+ const selected=new Set(asset?.selected_candidate_ids||[]);
+ return new Map((asset?.pages||[]).map(page=>[
+  page.id,
+  new Set((page.candidates||[]).filter(candidate=>selected.has(candidate.id)).map(candidate=>candidate.id)),
+ ]));
+}
+
+export function selectionForPage(selections,pageId) {
+ return new Set(selections.get(pageId)||[]);
+}
+
+export function togglePageCandidate(selections,pageId,candidateId) {
+ const next=new Map([...selections].map(([id,selected])=>[id,new Set(selected)]));
+ const selected=next.get(pageId)||new Set();
+ if(selected.has(candidateId))selected.delete(candidateId);else selected.add(candidateId);
+ next.set(pageId,selected);
+ return next;
+}
+
+export function candidatesForPage(page,selected) {
+ return (page?.candidates||[]).filter(candidate=>selected.has(candidate.id));
+}
+
+export function candidatesIntersecting(candidates,rect) {
+ return candidates.filter(candidate=>{
+  const box=candidate.box;
+  return box.x<rect.x+rect.w&&box.x+box.w>rect.x&&box.y<rect.y+rect.h&&box.y+box.h>rect.y;
+ });
+}
+
+export function previewLayout(candidates,viewport) {
+ if(!candidates.length)return {bounds:null,items:[]};
+ const left=Math.min(...candidates.map(candidate=>candidate.box.x));
+ const top=Math.min(...candidates.map(candidate=>candidate.box.y));
+ const right=Math.max(...candidates.map(candidate=>candidate.box.x+candidate.box.w));
+ const bottom=Math.max(...candidates.map(candidate=>candidate.box.y+candidate.box.h));
+ const bounds={x:left,y:top,w:right-left,h:bottom-top};
+ const available={w:Math.max(1,viewport.width-24),h:Math.max(1,viewport.height-24)};
+ const scale=Math.min(available.w/bounds.w,available.h/bounds.h);
+ const offset={x:(viewport.width-bounds.w*scale)/2,y:(viewport.height-bounds.h*scale)/2};
+ return {bounds,scale,items:candidates.map(candidate=>({
+  id:candidate.id,
+  x:offset.x+(candidate.box.x-bounds.x)*scale,
+  y:offset.y+(candidate.box.y-bounds.y)*scale,
+  w:candidate.box.w*scale,
+  h:candidate.box.h*scale,
+ }))};
+}
+
 export function pickerReady(selected) {
  return selected.size>0;
 }
@@ -29,27 +79,34 @@ export function logoPickerDialog(project,applyCandidateIds) {
  const first=pages.find(page=>!page.error&&page.candidates?.length);
  if(!first)return;
  let activePageId=first.id;
- let selected=new Set(asset.selected_candidate_ids||[]);
+ let selections=pageSelections(asset);
  let applying=false;
  let previewToken=0;
+ let drag=null;
  const root=dialog('选择 Logo 内容',{canClose:()=>!applying});
  const grid=el('div','logo-picker-grid');
  const pagesColumn=el('section','picker-pages');
- const candidatesColumn=el('section','picker-candidates');
+ const sourceColumn=el('section','picker-source');
  const previewColumn=el('section','picker-preview');
  const pageList=el('div','picker-page-list');
- const candidateList=el('div','picker-candidate-list');
+ const sourceStage=el('div','picker-source-stage');
+ const sourceCanvas=svgNode('svg');
+ sourceCanvas.classList.add('picker-source-canvas');
+ sourceCanvas.setAttribute('aria-label','当前页面 Logo 内容选择画布');
+ const sourceStatus=el('p','picker-source-status');
  const count=el('p','muted');
  const preview=el('canvas','picker-preview-canvas');
  preview.width=480;
  preview.height=250;
  pagesColumn.append(el('h3','','页面'),pageList);
- candidatesColumn.append(el('h3','','候选内容'),candidateList);
+ sourceStage.append(sourceCanvas);
+ sourceColumn.append(el('h3','','页面内容'),sourceStage,sourceStatus);
  previewColumn.append(el('h3','','已选预览'),count,preview);
- grid.append(pagesColumn,candidatesColumn,previewColumn);
+ grid.append(pagesColumn,sourceColumn,previewColumn);
  root.append(grid);
  const footer=el('div','dialog-footer');
  const submit=button('确认使用',async()=>{
+  const selected=selectionForPage(selections,activePageId);
   if(applying||!pickerReady(selected))return;
   applying=true;render();
   try{await applyCandidateIds([...selected]);closeDialog();}catch(error){dialogError(root,error);}finally{applying=false;render();}
@@ -57,51 +114,105 @@ export function logoPickerDialog(project,applyCandidateIds) {
  footer.append(button('取消',closeDialog),submit);root.append(footer);
 
  function currentPage(){return pages.find(page=>page.id===activePageId)||first;}
- function selectedCandidates(){return pages.flatMap(page=>page.candidates||[]).filter(candidate=>selected.has(candidate.id));}
+ function currentSelection(){return selectionForPage(selections,currentPage().id);}
+ function selectedCandidates(){return candidatesForPage(currentPage(),currentSelection());}
+ function addCandidates(candidates){
+  if(!candidates.length)return;
+  const page=currentPage(),next=new Map([...selections].map(([id,selected])=>[id,new Set(selected)]));
+  const selected=selectionForPage(next,page.id);
+  for(const candidate of candidates)selected.add(candidate.id);
+  next.set(page.id,selected);
+  selections=next;
+ }
+ function sourcePoint(event){
+  const point=sourceCanvas.createSVGPoint();
+  point.x=event.clientX;point.y=event.clientY;
+  return point.matrixTransform(sourceCanvas.getScreenCTM().inverse());
+ }
+ function sourceRect(start,end){
+  return {x:Math.min(start.x,end.x),y:Math.min(start.y,end.y),w:Math.abs(end.x-start.x),h:Math.abs(end.y-start.y)};
+ }
+ function candidateAt(point){
+  return (currentPage().candidates||[])
+   .filter(candidate=>point.x>=candidate.box.x&&point.x<=candidate.box.x+candidate.box.w&&point.y>=candidate.box.y&&point.y<=candidate.box.y+candidate.box.h)
+   .sort((a,b)=>a.box.w*a.box.h-b.box.w*b.box.h)[0]||null;
+ }
+ function drawSource(){
+  const page=currentPage(),box=page.source_box;
+  sourceCanvas.replaceChildren();
+  if(!box)return;
+  sourceCanvas.setAttribute('viewBox',`${box.x} ${box.y} ${box.w} ${box.h}`);
+  sourceCanvas.append(svgNode('image',{href:fileURL(project,page.source_preview),x:box.x,y:box.y,width:box.w,height:box.h,preserveAspectRatio:'none'}));
+  const selected=currentSelection();
+  for(const candidate of page.candidates||[]){
+   const chosen=selected.has(candidate.id);
+   const overlay=svgNode('rect',{x:candidate.box.x,y:candidate.box.y,width:candidate.box.w,height:candidate.box.h,fill:chosen?'#27664c22':'transparent',stroke:chosen?'#27664c':'transparent','stroke-width':1.4,'vector-effect':'non-scaling-stroke'});
+   overlay.classList.add('picker-source-candidate');
+   sourceCanvas.append(overlay);
+  }
+  if(drag?.pageId===page.id&&drag.current){
+   const box=sourceRect(drag.start,drag.current);
+   sourceCanvas.append(svgNode('rect',{x:box.x,y:box.y,width:box.w,height:box.h,fill:'#27664c1c',stroke:'#27664c','stroke-width':1.2,'stroke-dasharray':'4 3','vector-effect':'non-scaling-stroke'}));
+  }
+ }
  function drawPreview(){
   const token=++previewToken,items=selectedCandidates();
   const context=preview.getContext('2d');
   context.clearRect(0,0,preview.width,preview.height);
   if(!items.length)return;
+  const layout=previewLayout(items,{width:preview.width,height:preview.height});
   Promise.all(items.map(candidate=>new Promise(resolve=>{
    if(!candidate.preview)return resolve(null);
    const image=new Image();
-   image.onload=()=>resolve(image);image.onerror=()=>resolve(null);image.src=fileURL(project,candidate.preview);
+   image.onload=()=>resolve({candidate,image});image.onerror=()=>resolve(null);image.src=fileURL(project,candidate.preview);
   }))).then(images=>{
    if(token!==previewToken)return;
    context.clearRect(0,0,preview.width,preview.height);
-   const loaded=images.filter(Boolean);
-   if(!loaded.length)return;
-   const slotWidth=preview.width/loaded.length;
-   for(const [index,image]of loaded.entries()){
-    const scale=Math.min((slotWidth-24)/image.naturalWidth,(preview.height-24)/image.naturalHeight);
-    const width=image.naturalWidth*scale,height=image.naturalHeight*scale;
-    context.drawImage(image,index*slotWidth+(slotWidth-width)/2,(preview.height-height)/2,width,height);
+   for(const item of images.filter(Boolean)){
+    const place=layout.items.find(entry=>entry.id===item.candidate.id);
+    if(place)context.drawImage(item.image,place.x,place.y,place.w,place.h);
    }
   });
  }
+ sourceCanvas.addEventListener('pointerdown',event=>{
+  if(applying||event.button!==0)return;
+  drag={pageId:currentPage().id,start:sourcePoint(event),current:null,client:{x:event.clientX,y:event.clientY}};
+  sourceCanvas.setPointerCapture(event.pointerId);
+ });
+ sourceCanvas.addEventListener('pointermove',event=>{
+  if(!drag||applying)return;
+  drag.current=sourcePoint(event);
+  render();
+ });
+ sourceCanvas.addEventListener('pointerup',event=>{
+  if(!drag||applying)return;
+  const active=drag,page=currentPage(),end=sourcePoint(event);
+  drag=null;
+  const moved=Math.hypot(event.clientX-active.client.x,event.clientY-active.client.y)>4;
+  if(moved)addCandidates(candidatesIntersecting(page.candidates||[],sourceRect(active.start,end)));
+  else {
+   const candidate=candidateAt(end);
+   if(candidate)selections=togglePageCandidate(selections,page.id,candidate.id);
+  }
+  render();
+ });
+ sourceCanvas.addEventListener('pointercancel',()=>{drag=null;render();});
  function render(){
   const page=currentPage();
   pageList.replaceChildren();
   for(const item of pages){
    const label=item.error?`${item.label} · 无法读取`:item.label;
-   const row=button(label,()=>{activePageId=item.id;render();},`picker-page${item.id===page.id?' active':''}`);
+   const row=button(label,()=>{activePageId=item.id;drag=null;render();},`picker-page${item.id===page.id?' active':''}`);
    row.disabled=Boolean(item.error)||applying;
    pageList.append(row);
    if(item.error)pageList.append(el('p','picker-page-error',item.error));
   }
-  candidateList.replaceChildren();
-  for(const candidate of page.candidates||[]){
-   const row=el('label',`picker-candidate${selected.has(candidate.id)?' selected':''}`),check=el('input');
-   check.type='checkbox';check.checked=selected.has(candidate.id);check.disabled=applying;
-   check.onchange=()=>{selected=mergeCandidateIds(selected,candidate.id);render();};
-   row.append(check);
-   if(candidate.preview){const image=el('img');image.src=fileURL(project,candidate.preview);image.alt='候选内容预览';row.append(image);}
-   row.append(el('span','',candidate.label));candidateList.append(row);
-  }
-  if(!(page.candidates||[]).length)candidateList.append(el('p','empty-note','此页没有可用的候选内容。'));
-  count.textContent=pickerReady(selected)?`已选 ${selected.size} 项`:'请选择至少一项';
+  const selected=currentSelection();
+  sourceStatus.textContent=pickerReady(selected)?`当前页已选 ${selected.size} 项`:'单击内容，或拖动框选多个内容';
+  count.textContent=pickerReady(selected)?`当前页已选 ${selected.size} 项`:'请选择当前页面的内容';
   submit.disabled=applying||!pickerReady(selected);submit.textContent=applying?'正在应用…':'确认使用';
+  sourceCanvas.style.pointerEvents=applying?'none':'';
+  drawSource();
   drawPreview();
  }
  render();

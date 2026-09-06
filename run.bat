@@ -1,12 +1,12 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-if exist "LogoMock.exe" (
-  start "" "LogoMock.exe" --data-dir "%~dp0."
+if exist "LogoMock\LogoMock.exe" (
+  start "" "LogoMock\LogoMock.exe" --data-dir "%~dp0."
   exit /b
 )
-if exist "dist\LogoMock.exe" (
-  start "" "dist\LogoMock.exe" --data-dir "%~dp0."
+if exist "dist\LogoMock\LogoMock.exe" (
+  start "" "dist\LogoMock\LogoMock.exe" --data-dir "%~dp0."
   exit /b
 )
 if not exist ".venv\Scripts\pythonw.exe" (

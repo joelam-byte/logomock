@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from app.config import PROJECTS_DIR
 from app.models import Project
 from app.services.geometry import normalize_geometry
-from app.services.errors import AppError, FILE_NOT_FOUND, INVALID_PAYLOAD, PROJECT_EXISTS, PROJECT_NOT_FOUND
+from app.services.errors import AppError, FILE_NOT_FOUND, INVALID_PAYLOAD, PROJECT_EXISTS, PROJECT_NOT_FOUND, WRITE_FAILED
 
 router = APIRouter(prefix='/api/projects', tags=['projects'])
 _LOCK = threading.RLock()
@@ -209,6 +209,19 @@ def clone_project(name: str, payload: dict):
         src.revision = 0
         cloned = _commit(target_name,src,0)
     return {'ok':True,'data':cloned.model_dump()}
+
+
+@router.delete('/{name}')
+def delete_project(name: str):
+    with storage_lock():
+        folder = project_dir(name)
+        if not (folder / 'project.json').is_file():
+            raise AppError(PROJECT_NOT_FOUND, f'项目不存在：{name}')
+        try:
+            shutil.rmtree(folder)
+        except OSError as exc:
+            raise AppError(WRITE_FAILED, f'无法删除任务：{exc}') from exc
+    return {'ok': True, 'data': {'deleted': name}}
 
 
 @router.get('/{name}/file/{file_path:path}')

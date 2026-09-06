@@ -5,7 +5,7 @@ from collections.abc import Callable
 from PIL import Image,ImageDraw,ImageFont
 
 
-def render(bag_path,logo_path,scheme,crop=None,*,tint: Callable[[Image.Image, str], Image.Image] | None = None):
+def render(bag_path,logo_path,scheme,*,tint: Callable[[Image.Image, str], Image.Image] | None = None):
     with Image.open(bag_path) as image:
         bag=image.convert('RGBA')
     with Image.open(logo_path) as image:
@@ -24,21 +24,13 @@ def render(bag_path,logo_path,scheme,crop=None,*,tint: Callable[[Image.Image, st
     layer=logo.transform(bag.size,Image.Transform.AFFINE,(sx,0,-rect.x*sx,0,sy,-rect.y*sy),
                          Image.Resampling.BICUBIC)
     bag=Image.alpha_composite(bag,layer)
-    if crop:
-        x=max(0,min(bag.width,round(crop.x)))
-        y=max(0,min(bag.height,round(crop.y)))
-        right=max(0,min(bag.width,round(crop.x+crop.w)))
-        bottom=max(0,min(bag.height,round(crop.y+crop.h)))
-        if right<=x or bottom<=y:
-            raise ValueError('裁剪框必须与产品图片相交')
-        bag=bag.crop((x,y,right,bottom))
     return bag
 
 
-def save_png(bag_path,logo_path,schemes,out_path,crop=None):
+def save_png(bag_path,logo_path,schemes,out_path):
     if len(schemes)!=1:
         raise ValueError('纯净效果图每个文件只能包含一个方案')
-    render(bag_path,logo_path,schemes[0],crop).save(out_path,format='PNG')
+    render(bag_path,logo_path,schemes[0]).save(out_path,format='PNG')
 
 
 def save_comparison(images,schemes,out_path):

@@ -1,0 +1,16 @@
+.topbar{gap:10px}
+.task-switcher{display:flex;align-items:center;gap:6px;width:430px;flex:0 1 430px;min-width:0}
+.task-switcher label{font-size:12px;font-weight:600;color:#66776c}
+.task-switcher select{height:35px;min-width:140px;flex:1;background:#f7f9f7}
+.task-switcher .small-button{flex:0 0 auto}
+.project-heading{margin-left:auto;justify-content:flex-end;min-width:0}
+.project-heading strong,.project-heading span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.left-panel{overflow:hidden}
+.left-tabs{margin-top:0;flex:0 0 auto}
+.left-tab-view{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding-right:2px}
+.local-note{flex:0 0 auto;margin-top:0;padding-top:10px;border-top:1px solid #edf0ed;background:#fff}
+.properties-section h3.section-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.lock-toggle{border:0!important;background:transparent!important;padding:1px 3px!important;line-height:1;font-size:14px!important}
+.lock-toggle:hover{background:#eef3ef!important}
+.split-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.split-actions button{padding-left:6px;padding-right:6px}

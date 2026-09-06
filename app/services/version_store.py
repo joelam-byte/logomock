@@ -128,6 +128,12 @@ def _safe_output_filename(value: str) -> str:
     return filename
 
 
+def customer_delivery_path(name: str, version_number: int, output_filename: str) -> Path:
+    """Return the stable local delivery path for one immutable task version."""
+    filename = _safe_output_filename(output_filename)
+    return project.project_dir(name) / 'output' / 'customer-confirmations' / f'version-{version_number:04d}-{filename}'
+
+
 def _write_delivery_temp(source: Path, destination: Path) -> Path:
     if not destination.parent.is_dir():
         raise AppError(WRITE_FAILED, '客户确认图保存位置不存在')

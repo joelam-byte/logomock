@@ -47,7 +47,7 @@
 
 ## 分享给同事
 
-从 GitHub Release 下载 Windows 发布压缩包，解压后把 `LogoMock.exe`、`run.bat` 和本说明放在同一文件夹。使用者不需要安装 Python，但要自行安装并配置 Inkscape，才能分析 SVG/PDF/AI Logo。
+从 GitHub Release 下载 Windows 发布压缩包后完整解压；保留其中的 `LogoMock` 文件夹、`run.bat` 和本说明的相对位置，然后双击 `run.bat`。使用者不需要安装 Python，但要自行安装并配置 Inkscape，才能分析 SVG/PDF/AI Logo。
 
 不要把客户项目目录、`config.json` 或客户素材提交到 GitHub。要交接某个任务时，单独复制相应的 `projects/<任务名称>/` 目录即可。
 
@@ -62,4 +62,4 @@ node --test tests/editor.test.mjs tests/ui-state.test.mjs
 .\build.bat
 ```
 
-构建结果为 `dist/LogoMock.exe`。开发时可用 `launcher.py --headless --port 8018 --data-dir <独立目录>` 启动；也支持 `LOGOMOCK_DATA_DIR`、`LOGOMOCK_INKSCAPE` 环境变量。
+构建结果为 `dist/LogoMock/LogoMock.exe`；发布时将整个 `dist/LogoMock/` 文件夹与 `run.bat` 一同打包。开发时可用 `launcher.py --headless --port 8018 --data-dir <独立目录>` 启动；也支持 `LOGOMOCK_DATA_DIR`、`LOGOMOCK_INKSCAPE` 环境变量。

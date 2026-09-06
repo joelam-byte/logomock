@@ -148,6 +148,19 @@ def test_clone_is_independent_and_listing_opens_saved_orders(client):
     assert {p['name'] for p in data(client.get('/api/projects'))} == {'sample','copy'}
 
 
+def test_delete_project_removes_only_the_selected_task_and_its_files(client):
+    data(client.post('/api/projects', json={'name': 'mistake-copy'}))
+    data(client.post('/api/projects', json={'name': 'keep'}))
+    (repo.input_dir('mistake-copy') / 'logo.ai').write_text('temporary copy', encoding='utf-8')
+
+    result = data(client.delete('/api/projects/mistake-copy'))
+
+    assert result == {'deleted': 'mistake-copy'}
+    assert not repo.project_dir('mistake-copy').exists()
+    assert (repo.project_dir('keep') / 'project.json').is_file()
+    assert [item['name'] for item in data(client.get('/api/projects'))] == ['keep']
+
+
 def test_file_path_prefix_does_not_allow_sibling_directory(client):
     data(client.post('/api/projects',json={'name':'sample'}))
     sibling=repo.PROJECTS_DIR / 'sample-secret'

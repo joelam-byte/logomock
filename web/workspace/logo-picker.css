@@ -1,0 +1,7 @@
+.logo-picker-grid{display:grid;grid-template-columns:130px minmax(300px,1fr) 240px;gap:18px;width:min(1040px,90vw);min-height:370px}
+.picker-pages,.picker-source,.picker-preview{min-width:0}
+.picker-pages,.picker-source{border-right:1px solid #edf0e9;padding-right:14px}
+.picker-source-stage{height:330px;border:1px solid #dfe5dc;border-radius:7px;background:#fff;overflow:hidden}
+.picker-source-canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
+.picker-source-candidate{cursor:pointer}
+.picker-source-status{margin:9px 1px 0;font-size:11px;color:#7f8d83}

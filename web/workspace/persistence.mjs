@@ -11,8 +11,10 @@ export async function api(path,{method='GET',body}={}) {const options={method};i
 export const projectURL = name => `/api/projects/${encodeURIComponent(name)}`;
 export const customerExport = (project,filename) => api(projectURL(project.name)+'/customer-export',{method:'POST',body:{revision:project.revision,filename}});
 export const listVersions = name => api(projectURL(name)+'/versions');
+export const productionExport = (project,versionId) => api(projectURL(project.name)+`/versions/${encodeURIComponent(versionId)}/production-export`,{method:'POST'});
 export const restoreVersion = (project,versionId) => api(projectURL(project.name)+`/versions/${encodeURIComponent(versionId)}/restore`,{method:'POST',body:{revision:project.revision}});
 export const deleteVersion = (name,versionId) => api(projectURL(name)+`/versions/${encodeURIComponent(versionId)}`,{method:'DELETE'});
+export const deleteProject = name => api(projectURL(name),{method:'DELETE'});
 export async function runExclusive(state,work,onBusyChange=()=>{}){
  if(state.busy)throw Object.assign(new Error('当前操作尚未完成，请稍后再试。'),{code:'OPERATION_BUSY'});
  state.busy=true;

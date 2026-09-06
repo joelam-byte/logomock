@@ -164,10 +164,17 @@ def candidate_seed_ids(root):
         ident = node.get('id', '')
         return ident.rsplit('--', 1)[-1] if ident else ''
 
+    def generated_page_layer(node):
+        """PDF import wrappers describe a page, not a customer Logo group."""
+        ident = node.get('id', '').rsplit('--', 1)[-1]
+        return bool(re.fullmatch(r'layer(?:[-_]?mc)?(?:[-_]?\d+)?', ident, re.I))
+
     def visit(node):
         for child in node:
             visit(child)
         if tag(node) != 'g':
+            return
+        if generated_page_layer(node):
             return
         available = [ident for ident in descendants(node) if ident not in claimed]
         if len(available) >= 2:
@@ -175,9 +182,6 @@ def candidate_seed_ids(root):
             claimed.update(available)
 
     visit(root)
-    for ident in descendants(root):
-        if ident not in claimed:
-            seeds.append(('', [ident]))
     return seeds
 
 

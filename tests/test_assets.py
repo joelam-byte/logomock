@@ -67,6 +67,39 @@ def test_grouped_wordmark_is_one_candidate_but_nested_background_is_separate(tmp
     assert frozenset({'page-0001--dimension'}) in by_members
 
 
+def test_generated_pdf_layer_splits_distant_logos_but_keeps_each_logo_together(tmp_path):
+    source = tmp_path / 'source.svg'
+    source.write_text('''<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 500 200">
+      <g id="layer-MC0" inkscape:label="Imported Layer">
+        <rect id="top-symbol" x="17" y="21" width="98" height="58"/>
+        <rect id="top-word" x="125" y="21" width="157" height="58"/>
+        <rect id="lower-symbol" x="54" y="124" width="58" height="58"/>
+        <rect id="lower-slash" x="114" y="124" width="38" height="57"/>
+        <rect id="lower-word" x="162" y="124" width="157" height="58"/>
+        <circle id="separate-dot" cx="444" cy="88" r="41"/>
+      </g>
+    </svg>''')
+    root = svg.prefix_ids(svg.prepare_svg(source), 'page-0001--')
+    boxes = {
+        'top-symbol': (17, 21, 98, 58), 'top-word': (125, 21, 157, 58),
+        'lower-symbol': (54, 124, 58, 58), 'lower-slash': (114, 124, 38, 57),
+        'lower-word': (162, 124, 157, 58), 'separate-dot': (403, 47, 82, 82),
+    }
+    objects = [AssetObject(
+        id=f'page-0001--{ident}', label=ident,
+        box={'x': x, 'y': y, 'w': width, 'h': height}, selected=True,
+    ) for ident, (x, y, width, height) in boxes.items()]
+
+    page = assets.group_page_candidates(root, objects, page_id='page-0001', page_number=1)
+    by_members = {frozenset(candidate.object_ids) for candidate in page.candidates}
+
+    assert by_members == {
+        frozenset({'page-0001--top-symbol', 'page-0001--top-word'}),
+        frozenset({'page-0001--lower-symbol', 'page-0001--lower-slash', 'page-0001--lower-word'}),
+        frozenset({'page-0001--separate-dot'}),
+    }
+
+
 def uploaded_two_page_pdf_project(client):
     data(client.post('/api/projects', json={'name': 'sample'}))
     writer = PdfWriter()
@@ -141,6 +174,28 @@ def test_select_candidates_unions_only_their_server_side_objects(client, monkeyp
     assert saved['asset']['selected_candidate_ids'] == candidate_ids
     assert seen['candidate_ids'] == candidate_ids
     assert saved['asset']['selected_ids'] == ['page-0001--word', 'page-0001--mark']
+
+
+def test_apply_candidates_rejects_a_selection_spanning_two_pages(tmp_path):
+    asset = Asset(
+        id='asset', kind='vector', width=10, height=10,
+        pages=[
+            AssetPage(id='page-0001', number=1, label='页面 1', candidates=[
+                Candidate(id='page-0001--candidate-1', label='组 1', object_ids=['page-0001--a'], box={'x': 0, 'y': 0, 'w': 10, 'h': 10}),
+            ]),
+            AssetPage(id='page-0002', number=2, label='页面 2', candidates=[
+                Candidate(id='page-0002--candidate-1', label='组 1', object_ids=['page-0002--b'], box={'x': 0, 'y': 0, 'w': 10, 'h': 10}),
+            ]),
+        ],
+    )
+
+    with pytest.raises(ValueError, match='一次只能从一个页面选择'):
+        assets.apply_candidates(
+            asset,
+            ['page-0001--candidate-1', 'page-0002--candidate-1'],
+            tmp_path,
+            object(),
+        )
 
 
 def test_svg_selection_preserves_group_transforms_defs_and_nonzero_origin(tmp_path):

@@ -26,6 +26,15 @@ class GeometryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Project.model_validate({'schemes':[{'id':'A'},{'id':'A'}]})
 
+    def test_product_and_print_area_locks_default_to_unlocked(self):
+        project = Project.model_validate({
+            'calibration': {'product_frame': {'x': 10, 'y': 20, 'w': 300, 'h': 150}, 'width_mm': 200},
+            'frames': [{'id': 'front', 'x': 10, 'y': 20, 'w': 300, 'h': 150}],
+        })
+
+        self.assertIs(project.calibration.model_dump().get('locked'), False)
+        self.assertIs(project.frames[0].model_dump().get('locked'), False)
+
 
 if __name__ == '__main__':
     unittest.main()

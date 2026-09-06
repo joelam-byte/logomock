@@ -73,7 +73,10 @@ def group_candidates(objects):
     if not remaining:
         return []
     whole=union_box(obj.box for obj in remaining)
-    gap=max(1,min(whole.w,whole.h)*0.05)
+    # PDF-compatible AI often separates a symbol and wordmark by a small,
+    # visually intentional gap. Keep those parts together without bridging
+    # clearly separate artworks elsewhere on the page.
+    gap=max(10,min(whole.w,whole.h)*0.07)
     groups=[]
     while remaining:
         group=[remaining.pop(0)]
@@ -126,7 +129,11 @@ def group_page_candidates(root, objects, *, page_id, page_number):
         consumed.update(obj.id for obj in members)
 
     leftovers = [obj for obj in objects if obj.id not in consumed]
-    for candidate in group_candidates(leftovers):
+    for obj in leftovers:
+        if obj.reason is not None:
+            object_number += 1
+            append(f'对象 {object_number}', [obj])
+    for candidate in group_candidates([obj for obj in leftovers if obj.reason is None]):
         append('', [by_id[ident] for ident in candidate.object_ids])
     return AssetPage(
         id=page_id,
@@ -427,6 +434,9 @@ def apply_candidates(asset, candidate_ids, project_root, engine):
     candidates = {candidate.id: (page, candidate) for page in asset.pages for candidate in page.candidates}
     if not set(candidate_ids) <= candidates.keys():
         raise ValueError('请选择一个或多个有效候选内容')
+    selected_pages = {candidates[candidate_id][0].id for candidate_id in candidate_ids}
+    if len(selected_pages) != 1:
+        raise ValueError('一次只能从一个页面选择 Logo 内容')
     selected_by_page = {}
     selected_ids = []
     boxes = []

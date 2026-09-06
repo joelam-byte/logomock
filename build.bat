@@ -10,4 +10,4 @@ if not exist ".venv\Scripts\python.exe" (
 if errorlevel 1 exit /b 1
 ".venv\Scripts\python.exe" -m PyInstaller --noconfirm LogoMock.spec
 if errorlevel 1 exit /b 1
-echo 已生成 dist\LogoMock.exe。Inkscape 需单独安装或配置。
+echo 已生成 dist\LogoMock\LogoMock.exe。发布时请保留整个 LogoMock 文件夹。Inkscape 需单独安装或配置。

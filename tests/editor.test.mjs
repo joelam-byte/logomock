@@ -22,6 +22,55 @@ test('corner resize keeps logo aspect when the lock is on',()=>{
 test('east handle changes only width when the aspect lock is off',()=>{
  assert.deepEqual(resizeFromHandle({x:10,y:20,w:100,h:50},'e',{x:30,y:0},2,false),{x:10,y:20,w:130,h:50});
 });
+test('product frame midpoint handles ignore pointer movement on the other axis',()=>{
+ const moved=(handle,point)=>{
+  const project=fixture(); let changed;
+  const editor=Object.assign(Object.create(Editor.prototype),{
+   point:()=>point,onChange:value=>{changed=value;},
+   gesture:{start:{x:0,y:0},selection:{kind:'product',id:'product'},handle,rect:{x:10,y:20,w:100,h:50},before:structuredClone(project),changed:false},
+  });
+  editor.move({});
+  return changed.calibration.product_frame;
+ };
+ assert.deepEqual(moved('n',{x:24,y:-20}),{x:10,y:0,w:100,h:70});
+ assert.deepEqual(moved('s',{x:-17,y:20}),{x:10,y:20,w:100,h:70});
+ assert.deepEqual(moved('e',{x:20,y:-11}),{x:10,y:20,w:120,h:50});
+ assert.deepEqual(moved('w',{x:-20,y:15}),{x:-10,y:20,w:120,h:50});
+});
+test('selected product frame shows corner and midpoint controls for precise resizing',()=>{
+ const originalDocument=globalThis.document;
+ const makeNode=tag=>({tag,attrs:{},style:{},children:[],setAttribute(key,value){this.attrs[key]=value;},getAttribute(key){return this.attrs[key]||null;},append(...nodes){this.children.push(...nodes);}});
+ globalThis.document={createElementNS:(_namespace,tag)=>makeNode(tag)};
+ try{
+  const editor=Object.assign(Object.create(Editor.prototype),{scale:1,getState:()=>({project:fixture()})});
+  const group=makeNode('g');
+  editor.rect(group,{x:10,y:20,w:100,h:50},'product','product','#a69869',{kind:'product',id:'product'});
+  assert.deepEqual(group.children.filter(node=>node.attrs['data-handle']).map(node=>node.attrs['data-handle']),['nw','n','ne','e','se','s','sw','w']);
+ }finally{globalThis.document=originalDocument;}
+});
+test('locked product frame hides resize controls',()=>{
+ const originalDocument=globalThis.document;
+ const makeNode=tag=>({tag,attrs:{},style:{},children:[],setAttribute(key,value){this.attrs[key]=value;},getAttribute(key){return this.attrs[key]||null;},append(...nodes){this.children.push(...nodes);}});
+ globalThis.document={createElementNS:(_namespace,tag)=>makeNode(tag)};
+ try{
+  const project=fixture(); project.calibration.locked=true;
+  const editor=Object.assign(Object.create(Editor.prototype),{scale:1,getState:()=>({project})});
+  const group=makeNode('g');
+  editor.rect(group,project.calibration.product_frame,'product','product','#a69869',{kind:'product',id:'product'});
+  assert.equal(group.children.some(node=>node.attrs['data-handle']),false);
+ }finally{globalThis.document=originalDocument;}
+});
+test('locked print area ignores pointer drag while remaining selectable',()=>{
+ const project=fixture(); project.frames[0].locked=true;
+ let selected=null;
+ const editor=Object.assign(Object.create(Editor.prototype),{
+  svg:{setPointerCapture(){}},point:()=>({x:40,y:50}),getState:()=>({project}),onSelect:value=>{selected=value;},tool:'select',clean:false,space:false,
+ });
+ const attributes={'data-kind':'frame','data-id':'f'};
+ editor.down({button:0,pointerId:1,target:{getAttribute:key=>attributes[key]||null}});
+ assert.deepEqual(selected,{kind:'frame',id:'f'});
+ assert.equal(Boolean(editor.gesture),false);
+});
 test('new placement starts with the original Logo color and aspect lock',()=>{
  const s=newScheme(fixture(),'f','s');
  assert.equal(s.color,'original');

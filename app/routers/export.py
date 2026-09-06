@@ -1,6 +1,7 @@
 """One immutable snapshot per export. Failed runs never replace earlier deliverables."""
 import os
 import re
+import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +11,7 @@ from PIL import Image
 
 from app.config import get_engine
 from app.routers import project
-from app.services import customer_export, placement_svg, save_dialog, selection_png, spec_svg
+from app.services import customer_export, placement_png, placement_svg, selection_png, spec_svg
 from app.services import version_store as versions
 from app.services.errors import AppError,INVALID_PAYLOAD,ENGINE_NOT_FOUND
 from app.services.geometry import normalize_geometry,validate_export
@@ -35,20 +36,89 @@ def export_customer_confirmation(name: str, payload: dict):
         raise AppError(INVALID_PAYLOAD, '请先上传产品图片并确认 Logo')
     requested_name = payload.get('filename')
     initial_name = requested_name if isinstance(requested_name, str) and requested_name else f'{name}_效果图.png'
-    destination = save_dialog.choose_png_destination(initial_name)
-    if destination is None:
-        return {'ok': True, 'data': {'cancelled': True}}
     try:
         preview = customer_export.render_confirmation(
             project.safe_file(name, source.inputs.bag_image),
             project.safe_file(name, source.inputs.logo_preview),
             scheme,
-            source.crop,
         )
     except (OSError, ValueError) as exc:
         raise AppError(INVALID_PAYLOAD, f'无法生成客户确认图：{exc}') from exc
+    destination = versions.customer_delivery_path(name, source.next_version_number, initial_name)
+    destination.parent.mkdir(parents=True, exist_ok=True)
     manifest = versions.commit_version(name, source, preview, destination.name, destination)
-    return {'ok': True, 'data': {'cancelled': False, 'version': manifest.model_dump()}}
+    return {'ok': True, 'data': {
+        'cancelled': False,
+        'version': manifest.model_dump(),
+        'output_path': destination.relative_to(project.project_dir(name)).as_posix(),
+    }}
+
+
+@router.post('/versions/{version_id}/production-export')
+def export_version_production_files(name: str, version_id: str):
+    """Create the three factory files from one immutable customer-confirmed version."""
+    manifest, source = versions.load_version(name, version_id)
+    snapshot = normalize_geometry(source)
+    scheme = require_single_active_scheme(snapshot)
+    validate_export(snapshot, [scheme])
+    if not snapshot.inputs.bag_image:
+        raise AppError(INVALID_PAYLOAD, '请先上传产品图片')
+    bag = project.safe_file(name, snapshot.inputs.bag_image)
+    logo = project.safe_file(name, snapshot.inputs.logo_svg)
+    preview = project.safe_file(name, snapshot.inputs.logo_preview)
+    if not all(path.is_file() for path in (bag, logo, preview)):
+        raise AppError(INVALID_PAYLOAD, '该版本的素材文件缺失，无法生成生产文件')
+    engine = get_engine()
+    if not engine.available():
+        raise AppError(ENGINE_NOT_FOUND, '导出 Logo 尺寸稿 PDF 需要 Inkscape')
+
+    folder_name = re.sub(r'[^A-Za-z0-9_-]', '_', manifest.version_id)
+    output_root = project.project_dir(name) / 'output' / 'production'
+    final = output_root / folder_name
+    filenames = ['Logo尺寸稿.svg', 'Logo尺寸稿.pdf', '印刷定位图.png']
+    if (final.is_dir() and all((final / filename).is_file() for filename in filenames)
+            and spec_svg.is_current_size_spec(final / 'Logo尺寸稿.svg')):
+        return {'ok': True, 'data': {
+            'files': [(Path('output') / 'production' / folder_name / filename).as_posix() for filename in filenames],
+            'version_id': manifest.version_id,
+        }}
+
+    output_root.mkdir(parents=True, exist_ok=True)
+    staging = output_root / f'.pending-{uuid.uuid4().hex}'
+    staging.mkdir()
+    previous = None
+    try:
+        size_svg = staging / 'Logo尺寸稿.svg'
+        size_pdf = staging / 'Logo尺寸稿.pdf'
+        placement = staging / '印刷定位图.png'
+        size_svg.write_text(spec_svg.build(logo, scheme), encoding='utf-8')
+        engine.svg_to_pdf(size_svg, size_pdf, text_to_path=True)
+        frame = next(frame for frame in snapshot.frames if frame.id == scheme.frame_id)
+        placement_png.render(
+            bag,
+            preview,
+            frame,
+            scheme,
+            pixels_per_mm=snapshot.calibration.px_per_mm,
+        ).save(placement, format='PNG')
+        if final.exists():
+            previous = output_root / f'.legacy-{uuid.uuid4().hex}'
+            os.replace(final, previous)
+        os.replace(staging, final)
+        staging = None
+        if previous is not None:
+            shutil.rmtree(previous)
+            previous = None
+    finally:
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
+        if previous is not None and previous.exists() and not final.exists():
+            os.replace(previous, final)
+
+    return {'ok': True, 'data': {
+        'files': [(Path('output') / 'production' / folder_name / filename).as_posix() for filename in filenames],
+        'version_id': manifest.version_id,
+    }}
 
 
 @router.post('/export')
@@ -94,7 +164,7 @@ def export_project(name:str,payload:dict):
         # User-visible IDs need not be safe filenames or unique after sanitization.
         label=re.sub(r'[^a-zA-Z0-9_-]','_',scheme.id)[:40] or 'scheme'
         suffix=f'{index:02}-{label}'
-        rendered=selection_png.render(bag,preview,scheme,snapshot.crop)
+        rendered=selection_png.render(bag,preview,scheme)
         if payload.get('comparison'):
             images.append(rendered)
         if 'png' in formats:
@@ -131,8 +201,6 @@ def export_project(name:str,payload:dict):
         files.append('comparison.png')
     if snapshot.asset.kind=='raster':
         warnings.append(dict(code='RASTER_ARTWORK',message='原 Logo 是位图；SVG / PDF 中仍为嵌入位图，不是真正的矢量生产稿'))
-    if snapshot.crop:
-        warnings.append(dict(code='CROP_SCOPE',message='裁剪仅作用于效果图；定位图保留完整照片和参照'))
     if skipped:
         warnings.append(dict(code=ENGINE_NOT_FOUND,message='PDF 未生成；已生成的 PNG / SVG 可使用'))
     project.atomic_write_json(staging/'snapshot.json',snapshot.model_dump())

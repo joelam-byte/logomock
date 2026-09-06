@@ -9,10 +9,23 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from queue import Empty
 
 
 def prepare_runtime(folder):
     (folder/'projects').mkdir(parents=True,exist_ok=True)
+    if getattr(sys,'frozen',False):
+        # A one-folder PyInstaller build stores Tcl/Tk beside the executable,
+        # while the bootloader's temporary module location does not contain it.
+        # Override the runtime hook value so the launcher can create its control
+        # window (and therefore the native Save As window).
+        bundled=Path(sys.executable).resolve().parent/'_internal'
+        tcl=bundled/'_tcl_data'
+        tk=bundled/'_tk_data'
+        if (tcl/'init.tcl').is_file() and (tk/'tk.tcl').is_file():
+            os.environ['TCL_LIBRARY']=str(tcl)
+            os.environ['TK_LIBRARY']=str(tk)
+        return
     # Development fallback for a Conda Tcl installation inaccessible to Tcl's
     # own file loader. Frozen builds use PyInstaller's collected runtime hook.
     if not getattr(sys,'frozen',False):
@@ -85,6 +98,7 @@ def main():
     worker.start()
     import tkinter as tk
     from tkinter import messagebox
+    from app.services import save_dialog
     root=tk.Tk()
     root.title('LogoMock · 本地工作台')
     root.geometry('470x260')
@@ -98,6 +112,24 @@ def main():
     buttons.pack(pady=10)
     tk.Button(buttons,text='打开工作台',command=lambda:webbrowser.open(url),width=15).pack(side='left',padx=5)
     tk.Button(buttons,text='打开项目目录',command=lambda:os.startfile(folder/'projects'),width=15).pack(side='left',padx=5)
+    save_broker=save_dialog.SaveDialogBroker()
+    save_dialog.configure_broker(save_broker)
+
+    def service_save_dialog_requests():
+        while True:
+            try:
+                request=save_broker.next_request(timeout=0)
+            except Empty:
+                break
+            try:
+                print('[save-dialog] desktop thread received request',flush=True)
+                destination=save_dialog.show_png_destination(root,request.initial_name)
+            except Exception as exc:
+                save_broker.reject(request,exc)
+            else:
+                print('[save-dialog] native dialog closed',flush=True)
+                save_broker.resolve(request,destination)
+        root.after(80,service_save_dialog_requests)
 
     def ready():
         if server.started:
@@ -114,7 +146,9 @@ def main():
             root.destroy()
     root.protocol('WM_DELETE_WINDOW',close)
     root.after(100,ready)
+    root.after(80,service_save_dialog_requests)
     root.mainloop()
+    save_dialog.configure_broker(None)
     worker.join(timeout=3)
     sock.close()
     log.close()
