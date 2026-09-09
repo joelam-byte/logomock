@@ -49,6 +49,23 @@ export function candidatesIntersecting(candidates,rect) {
  });
 }
 
+export function candidateAtPoint(candidates,point,minHitSize=0) {
+ const expand=box=>{
+  const width=Math.max(box.w,minHitSize),height=Math.max(box.h,minHitSize);
+  return {x:box.x-(width-box.w)/2,y:box.y-(height-box.h)/2,w:width,h:height};
+ };
+ return candidates
+  .map(candidate=>({...candidate,hitBox:expand(candidate.box)}))
+  .filter(candidate=>point.x>=candidate.hitBox.x&&point.x<=candidate.hitBox.x+candidate.hitBox.w&&point.y>=candidate.hitBox.y&&point.y<=candidate.hitBox.y+candidate.hitBox.h)
+  .sort((a,b)=>a.hitBox.w*a.hitBox.h-b.hitBox.w*b.hitBox.h)[0]||null;
+}
+
+export function clearPageSelection(selections,pageId) {
+ const next=new Map([...selections].map(([id,selected])=>[id,new Set(selected)]));
+ next.set(pageId,new Set());
+ return next;
+}
+
 export function previewLayout(candidates,viewport) {
  if(!candidates.length)return {bounds:null,items:[]};
  const left=Math.min(...candidates.map(candidate=>candidate.box.x));
@@ -93,14 +110,18 @@ export function logoPickerDialog(project,applyCandidateIds) {
  const sourceCanvas=svgNode('svg');
  sourceCanvas.classList.add('picker-source-canvas');
  sourceCanvas.setAttribute('aria-label','当前页面 Logo 内容选择画布');
+ sourceCanvas.setAttribute('tabindex','0');
  const sourceStatus=el('p','picker-source-status');
+ const sourceActions=el('div','picker-source-actions');
+ const clearButton=button('清空选择',()=>{selections=clearPageSelection(selections,currentPage().id);render();},'small-button');
  const count=el('p','muted');
  const preview=el('canvas','picker-preview-canvas');
  preview.width=480;
  preview.height=250;
  pagesColumn.append(el('h3','','页面'),pageList);
  sourceStage.append(sourceCanvas);
- sourceColumn.append(el('h3','','页面内容'),sourceStage,sourceStatus);
+ sourceActions.append(sourceStatus,clearButton);
+ sourceColumn.append(el('h3','','页面内容'),sourceStage,sourceActions);
  previewColumn.append(el('h3','','已选预览'),count,preview);
  grid.append(pagesColumn,sourceColumn,previewColumn);
  root.append(grid);
@@ -132,10 +153,13 @@ export function logoPickerDialog(project,applyCandidateIds) {
  function sourceRect(start,end){
   return {x:Math.min(start.x,end.x),y:Math.min(start.y,end.y),w:Math.abs(end.x-start.x),h:Math.abs(end.y-start.y)};
  }
- function candidateAt(point){
-  return (currentPage().candidates||[])
-   .filter(candidate=>point.x>=candidate.box.x&&point.x<=candidate.box.x+candidate.box.w&&point.y>=candidate.box.y&&point.y<=candidate.box.y+candidate.box.h)
-   .sort((a,b)=>a.box.w*a.box.h-b.box.w*b.box.h)[0]||null;
+  function candidateAt(point){
+  const box=currentPage().source_box;
+  const viewport=sourceCanvas.getBoundingClientRect();
+  const sourcePerPixel=box&&viewport.width&&viewport.height
+   ? Math.max(box.w/viewport.width,box.h/viewport.height)
+   : 1;
+  return candidateAtPoint(currentPage().candidates||[],point,Math.max(8,12*sourcePerPixel));
  }
  function drawSource(){
   const page=currentPage(),box=page.source_box;
@@ -193,10 +217,16 @@ export function logoPickerDialog(project,applyCandidateIds) {
   else {
    const candidate=candidateAt(end);
    if(candidate)selections=togglePageCandidate(selections,page.id,candidate.id);
+   else selections=clearPageSelection(selections,page.id);
   }
   render();
  });
  sourceCanvas.addEventListener('pointercancel',()=>{drag=null;render();});
+ sourceCanvas.addEventListener('keydown',event=>{
+  if(event.key!=='Escape'||applying)return;
+  selections=clearPageSelection(selections,currentPage().id);
+  render();
+ });
  function render(){
   const page=currentPage();
   pageList.replaceChildren();
@@ -208,8 +238,9 @@ export function logoPickerDialog(project,applyCandidateIds) {
    if(item.error)pageList.append(el('p','picker-page-error',item.error));
   }
   const selected=currentSelection();
-  sourceStatus.textContent=pickerReady(selected)?`当前页已选 ${selected.size} 项`:'单击内容，或拖动框选多个内容';
+  sourceStatus.textContent=pickerReady(selected)?`当前页已选 ${selected.size} 项 · 点击空白清空`:'单击选择，再次单击取消；拖动框选';
   count.textContent=pickerReady(selected)?`当前页已选 ${selected.size} 项`:'请选择当前页面的内容';
+  clearButton.disabled=applying||!selected.size;
   submit.disabled=applying||!pickerReady(selected);submit.textContent=applying?'正在应用…':'确认使用';
   sourceCanvas.style.pointerEvents=applying?'none':'';
   drawSource();

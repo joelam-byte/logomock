@@ -72,11 +72,22 @@ def group_candidates(objects):
     remaining=[obj for obj in objects if obj.selected and obj.box.w>0 and obj.box.h>0]
     if not remaining:
         return []
-    whole=union_box(obj.box for obj in remaining)
-    # PDF-compatible AI often separates a symbol and wordmark by a small,
-    # visually intentional gap. Keep those parts together without bridging
-    # clearly separate artworks elsewhere on the page.
-    gap=max(10,min(whole.w,whole.h)*0.07)
+
+    def same_visual_row(first_box, second_box):
+        overlap_height = max(0, min(first_box.y + first_box.h, second_box.y + second_box.h)
+                             - max(first_box.y, second_box.y))
+        minimum_height = min(first_box.h, second_box.h)
+        if minimum_height <= 0 or overlap_height / minimum_height < 0.35:
+            return False
+        horizontal_gap = max(
+            second_box.x - (first_box.x + first_box.w),
+            first_box.x - (second_box.x + second_box.w),
+            0,
+        )
+        # Keep letters in one visual row together, but do not bridge a second
+        # row such as BLACK LABEL below the main wordmark.
+        return horizontal_gap <= max(4, minimum_height * 1.5)
+
     groups=[]
     while remaining:
         group=[remaining.pop(0)]
@@ -84,10 +95,7 @@ def group_candidates(objects):
         while queue:
             box=queue.pop().box
             for other in remaining[:]:
-                b=other.box
-                dx=max(b.x-(box.x+box.w),box.x-(b.x+b.w),0)
-                dy=max(b.y-(box.y+box.h),box.y-(b.y+b.h),0)
-                if dx<=gap and dy<=gap:
+                if same_visual_row(box, other.box):
                     remaining.remove(other)
                     group.append(other)
                     queue.append(other)
@@ -105,6 +113,7 @@ def group_page_candidates(root, objects, *, page_id, page_number):
     consumed = set()
     group_number = 0
     object_number = 0
+    advisory = []
 
     def append(label, members):
         nonlocal group_number
@@ -125,16 +134,18 @@ def group_page_candidates(root, objects, *, page_id, page_number):
         append(source_label, normal)
         for obj in hinted:
             object_number += 1
-            append(f'对象 {object_number}', [obj])
+            advisory.append((f'对象 {object_number}', [obj]))
         consumed.update(obj.id for obj in members)
 
     leftovers = [obj for obj in objects if obj.id not in consumed]
     for obj in leftovers:
         if obj.reason is not None:
             object_number += 1
-            append(f'对象 {object_number}', [obj])
+            advisory.append((f'对象 {object_number}', [obj]))
     for candidate in group_candidates([obj for obj in leftovers if obj.reason is None]):
         append('', [by_id[ident] for ident in candidate.object_ids])
+    for label, members in advisory:
+        append(label, members)
     return AssetPage(
         id=page_id,
         number=page_number,
@@ -142,6 +153,16 @@ def group_page_candidates(root, objects, *, page_id, page_number):
         objects=objects,
         candidates=candidates,
     )
+
+
+def suggested_candidate_ids(page):
+    """Return a safe initial choice only when one normal candidate is unambiguous."""
+    objects = {obj.id: obj for obj in page.objects}
+    normal = [
+        candidate for candidate in page.candidates
+        if any(objects.get(object_id) and objects[object_id].reason is None for object_id in candidate.object_ids)
+    ]
+    return [normal[0].id] if len(normal) == 1 else []
 
 
 def _raster_source(image):
@@ -407,20 +428,32 @@ def analyse_source(source, folder, engine, project_root):
     first = next((page for page in pages if page.candidates), None)
     if first is None:
         raise ValueError('没有可用的 Logo 内容，请检查源文件或 Inkscape 设置')
-    chosen = first.candidates[0]
+    suggested = suggested_candidate_ids(first)
+    suggested_set = set(suggested)
+    selected_ids = [
+        object_id
+        for candidate in first.candidates
+        if candidate.id in suggested_set
+        for object_id in candidate.object_ids
+    ]
+    fallback = next((candidate for candidate in first.candidates if candidate.id not in suggested_set), first.candidates[0])
+    selected_boxes = [candidate.box for candidate in first.candidates if candidate.id in suggested_set]
+    size_box = union_box(selected_boxes or [fallback.box])
     for page in pages:
         for obj in page.objects:
-            obj.selected = obj.id in chosen.object_ids
-    if sum(len(page.candidates) for page in pages) > 1:
-        warnings.append('发现多个候选内容，暂选第一个候选；可组合多个候选，避免漏掉文字或附属图形。')
+            obj.selected = obj.id in selected_ids
+    if suggested:
+        warnings.append('已暂选唯一的 Logo 内容；尺寸线、背景和其他分离内容仍可恢复选择。')
+    elif sum(len(page.candidates) for page in pages) > 1:
+        warnings.append('发现多个候选内容，暂不自动选择；请在画布中选择需要使用的 Logo。')
     return Asset(
         id=uuid.uuid4().hex,
         kind=kind,
         pages=pages,
-        selected_candidate_ids=[chosen.id],
-        selected_ids=list(chosen.object_ids),
-        width=chosen.box.w,
-        height=chosen.box.h,
+        selected_candidate_ids=suggested,
+        selected_ids=selected_ids,
+        width=size_box.w,
+        height=size_box.h,
         warnings=warnings,
     )
 

@@ -14,7 +14,7 @@ from app.routers import convert, project as repo
 from app.services import pdf_pages
 from app.services import assets, svg_document as svg
 from app.services.svg_document import prepare_svg, select_svg
-from app.services.assets import classify_objects, group_candidates
+from app.services.assets import classify_objects, group_candidates, suggested_candidate_ids
 from app.services.raster_assets import clean_raster
 
 NS = '{http://www.w3.org/2000/svg}'
@@ -145,6 +145,38 @@ def test_analysis_keeps_failed_second_page_visible_and_does_not_silently_drop_it
     assert '第 2 页' in result['asset']['pages'][1]['error']
 
 
+def test_convert_keeps_multiple_candidates_for_manual_selection(monkeypatch, client):
+    data(client.post('/api/projects', json={'name': 'sample'}))
+    item = repo.load('sample')
+    source = repo.input_dir('sample') / 'logo-source.ai'
+    source.write_bytes(b'%PDF-1.7')
+    item.inputs.logo_source = source.relative_to(repo.project_dir('sample')).as_posix()
+    repo.save('sample', item)
+
+    asset = Asset(
+        id='asset', kind='vector', width=40, height=20,
+        pages=[AssetPage(
+            id='page-0001', number=1, label='页面 1',
+            candidates=[
+                Candidate(id='page-0001--candidate-1', label='组 1', object_ids=['page-0001--word'], box={'x': 10, 'y': 10, 'w': 40, 'h': 20}),
+                Candidate(id='page-0001--candidate-2', label='组 2', object_ids=['page-0001--mark'], box={'x': 70, 'y': 10, 'w': 20, 'h': 20}),
+            ],
+        )],
+        selected_candidate_ids=[], selected_ids=[],
+    )
+    monkeypatch.setattr(convert, 'analyse_source', lambda *_args: asset)
+
+    def fail_apply(*_args):
+        raise AssertionError('分析阶段不应应用空的候选列表')
+
+    monkeypatch.setattr(convert, 'apply_candidates', fail_apply)
+
+    result = data(client.post('/api/projects/sample/convert'))
+
+    assert result['asset']['selected_candidate_ids'] == []
+    assert result['inputs']['logo_preview'] is None
+
+
 def ready_multi_candidate_project(client):
     data(client.post('/api/projects', json={'name': 'sample'}))
     item = repo.load('sample')
@@ -236,6 +268,61 @@ def test_separated_artwork_produces_candidates_while_nearby_parts_stay_together(
     objects=classify_objects(items,Rect(x=0,y=0,w=200,h=100))
     groups=group_candidates(objects)
     assert {frozenset(g.object_ids) for g in groups} == {frozenset({'a','b'}),frozenset({'c'})}
+
+
+def test_visual_rows_stay_separate_and_advisory_lines_follow_logo_candidates():
+    root = ET.fromstring('<svg xmlns="http://www.w3.org/2000/svg"><g id="layer-MC0"/></svg>')
+    objects = [
+        AssetObject(id='word-a', label='对象 1', box={'x': 0, 'y': 0, 'w': 20, 'h': 20}),
+        AssetObject(id='word-b', label='对象 2', box={'x': 21, 'y': 0, 'w': 20, 'h': 20}),
+        AssetObject(id='label-a', label='对象 3', box={'x': 4, 'y': 27, 'w': 6, 'h': 7}),
+        AssetObject(id='label-b', label='对象 4', box={'x': 16, 'y': 27, 'w': 6, 'h': 7}),
+        AssetObject(id='line-left', label='对象 5', box={'x': 0, 'y': 36, 'w': 16, 'h': 0.6}, reason='dimension', selected=False),
+        AssetObject(id='line-right', label='对象 6', box={'x': 30, 'y': 36, 'w': 16, 'h': 0.6}, reason='dimension', selected=False),
+    ]
+
+    page = assets.group_page_candidates(root, objects, page_id='page-0001', page_number=1)
+
+    assert [candidate.object_ids for candidate in page.candidates] == [
+        ['word-a', 'word-b'],
+        ['label-a', 'label-b'],
+        ['line-left'],
+        ['line-right'],
+    ]
+
+
+def test_initial_selection_is_empty_when_multiple_normal_candidates_exist():
+    page = AssetPage(
+        id='page-0001', number=1, label='页面 1',
+        objects=[
+            AssetObject(id='logo-a', label='对象 1', box={'x': 0, 'y': 0, 'w': 20, 'h': 20}),
+            AssetObject(id='logo-b', label='对象 2', box={'x': 40, 'y': 0, 'w': 20, 'h': 20}),
+            AssetObject(id='line', label='对象 3', box={'x': 0, 'y': 30, 'w': 20, 'h': 0.6}, reason='dimension', selected=False),
+        ],
+        candidates=[
+            Candidate(id='logo-candidate', label='组 1', object_ids=['logo-a'], box={'x': 0, 'y': 0, 'w': 20, 'h': 20}),
+            Candidate(id='second-candidate', label='组 2', object_ids=['logo-b'], box={'x': 40, 'y': 0, 'w': 20, 'h': 20}),
+            Candidate(id='line-candidate', label='对象 1', object_ids=['line'], box={'x': 0, 'y': 30, 'w': 20, 'h': 0.6}),
+        ],
+    )
+
+    assert suggested_candidate_ids(page) == []
+
+
+def test_initial_selection_uses_the_only_normal_candidate():
+    page = AssetPage(
+        id='page-0001', number=1, label='页面 1',
+        objects=[
+            AssetObject(id='logo', label='对象 1', box={'x': 0, 'y': 0, 'w': 20, 'h': 20}),
+            AssetObject(id='line', label='对象 2', box={'x': 0, 'y': 30, 'w': 20, 'h': 0.6}, reason='dimension', selected=False),
+        ],
+        candidates=[
+            Candidate(id='logo-candidate', label='组 1', object_ids=['logo'], box={'x': 0, 'y': 0, 'w': 20, 'h': 20}),
+            Candidate(id='line-candidate', label='对象 1', object_ids=['line'], box={'x': 0, 'y': 30, 'w': 20, 'h': 0.6}),
+        ],
+    )
+
+    assert suggested_candidate_ids(page) == ['logo-candidate']
 
 
 def test_raster_removes_edge_background_but_keeps_white_inside_logo():

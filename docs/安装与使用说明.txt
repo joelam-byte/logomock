@@ -1,0 +1,51 @@
+LogoMock 绿色版安装与使用说明
+
+一、发布包内容
+
+1. LogoMock 文件夹：应用程序及运行依赖。
+2. LogoMock\LogoMock.exe：主程序，双击即可启动。
+3. 安装与使用说明.md：Markdown 版说明，适合使用支持 Markdown 的编辑器打开。
+4. 安装与使用说明.txt：普通文本版说明，可直接用 Windows 记事本打开。
+
+二、首次安装
+
+1. 从 GitHub Release 下载 Windows 发布压缩包。
+2. 将压缩包完整解压到有写入权限的文件夹，例如 D:\LogoMock。不要直接在压缩包预览窗口中运行，也不要放在 Program Files 中。
+3. 进入 LogoMock 文件夹，双击 LogoMock.exe。程序会打开本地工作台，不需要安装 Python。
+4. LogoMock 需要 Inkscape 来读取、分析 SVG、PDF、PDF 兼容 AI Logo，以及生成部分生产文件。请另行安装官方 Inkscape Windows 64 位 MSI 版本：
+   https://inkscape.org/release/
+5. 打开 LogoMock 右上角“设置”。如果没有显示“Inkscape 已就绪”，请选择 Inkscape 的 inkscape.exe，安装版通常位于：
+   C:\Program Files\Inkscape\bin\inkscape.exe
+
+三、日常使用流程
+
+1. 新建任务。
+2. 导入产品图片。
+3. 导入 Logo，并完成 Logo 分析与内容选择。
+4. 调整产品尺寸框、印标区域、Logo 位置、实际尺寸和显示颜色。
+5. 点击“生成客户确认图”，输出给客户确认。
+6. 客户反馈后，在“版本记录”中恢复对应版本，修改后再次导出。
+
+客户确认图只保留干净的产品图和 Logo，并标注 Logo 实际宽 × 高（mm）；编辑框、参考线和操作界面不会绘制到确认图中。
+
+四、文件格式
+
+- 产品图支持 PNG、JPG、JPEG、WebP。
+- Logo 支持 SVG、PDF、PDF 兼容 AI、PNG、JPG、JPEG、WebP。
+- AI 文件必须在 Illustrator 中启用“创建 PDF 兼容文件”后保存，否则可能无法读取。
+- PDF 和 PDF 兼容 AI 会读取可解析的页面，导入后可选择需要使用的 Logo 内容。
+
+五、数据保存与备份
+
+- 任务、版本和素材保存在 LogoMock 文件夹旁边的 projects 文件夹中。
+- 更换电脑时，建议先关闭程序，再复制整个 projects 文件夹。
+- 不要删除 LogoMock 文件夹中的 _internal 文件夹，否则程序可能无法启动。
+
+六、常见问题
+
+1. 双击后打不开：确认 LogoMock 文件夹及其中的 _internal 文件夹完整保留，并从完整解压后的文件夹运行。
+2. 找不到 Inkscape：在“设置”中手动选择实际安装位置的 inkscape.exe。
+3. AI 导入失败：请客户重新导出 PDF，或在 Illustrator 中开启“创建 PDF 兼容文件”后重新保存 AI。
+4. 导出的图片出现原始尺寸线或边框：这些内容通常来自产品原图或被选入的 Logo 内容，请更换干净的产品图或重新确认 Logo 内容。
+
+LogoMock 本身是绿色版，不需要安装；Inkscape 是独立软件，需要单独安装或配置。

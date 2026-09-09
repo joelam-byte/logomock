@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { nextPrimaryAction, canCustomerExport, suggestedFilename, selectedProjectName, taskActionState } from '../web/workspace/state.mjs';
-import { pageSelections, selectionForPage, togglePageCandidate, previewLayout, candidatesIntersecting, pickerReady } from '../web/workspace/assets.mjs';
+import { pageSelections, selectionForPage, togglePageCandidate, previewLayout, candidatesIntersecting, candidateAtPoint, clearPageSelection, pickerReady } from '../web/workspace/assets.mjs';
 import { formatVersionLabel, versionActionState } from '../web/workspace/versions.mjs';
 import * as persistence from '../web/workspace/persistence.mjs';
 
@@ -108,6 +108,27 @@ test('drag selection returns only candidates intersecting the current source rec
   ], { x: 5, y: 5, w: 80, h: 40 });
 
   assert.deepEqual(selected.map(item => item.id), ['m', 'e']);
+});
+
+test('thin candidates receive a usable hit area and win over larger overlapping candidates', () => {
+  const hit = candidateAtPoint([
+    { id: 'logo', box: { x: 0, y: 0, w: 100, h: 60 } },
+    { id: 'line', box: { x: 10, y: 30, w: 40, h: 0.6 } },
+  ], { x: 30, y: 31 }, 10);
+
+  assert.equal(hit.id, 'line');
+});
+
+test('clearing an empty page selection does not affect another page', () => {
+  const selections = new Map([
+    ['page-0001', new Set(['page-0001--logo'])],
+    ['page-0002', new Set(['page-0002--logo'])],
+  ]);
+
+  const cleared = clearPageSelection(selections, 'page-0001');
+
+  assert.deepEqual([...selectionForPage(cleared, 'page-0001')], []);
+  assert.deepEqual([...selectionForPage(cleared, 'page-0002')], ['page-0002--logo']);
 });
 
 test('version UI protects read-only legacy records and formats internal labels', () => {

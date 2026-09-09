@@ -4,4 +4,6 @@
 .picker-source-stage{height:330px;border:1px solid #dfe5dc;border-radius:7px;background:#fff;overflow:hidden}
 .picker-source-canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
 .picker-source-candidate{cursor:pointer}
+.picker-source-actions{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .picker-source-status{margin:9px 1px 0;font-size:11px;color:#7f8d83}
+.picker-source-actions .small-button{margin-top:6px;padding:4px 6px;font-size:10px}

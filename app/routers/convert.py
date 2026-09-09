@@ -20,7 +20,13 @@ def convert_logo(name: str):
     try:
         engine = get_engine()
         asset=analyse_source(project.safe_file(name,source),folder,engine,base)
-        asset,clean,preview=apply_candidates(asset,asset.selected_candidate_ids,base,engine)
+        if asset.selected_candidate_ids:
+            asset,clean,preview=apply_candidates(asset,asset.selected_candidate_ids,base,engine)
+        else:
+            # Multiple normal candidates must stay available for the picker;
+            # applying an empty selection here would abort analysis before the
+            # user can choose the intended Logo content.
+            clean = preview = None
     except ValueError as exc:
         raise AppError(INVALID_PAYLOAD,str(exc)) from exc
     item.asset=asset
